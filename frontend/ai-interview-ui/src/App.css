@@ -5,24 +5,153 @@
   left: 0;
   width: 100vw;
   height: 100vh;
-  background: rgba(30, 30, 47, 0.55);
+  background: rgba(49, 46, 129, 0.22);
+  backdrop-filter: blur(12px);
   z-index: 9999;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 24px;
+  animation: popupFadeIn 0.18s ease-out forwards;
 }
 .modal-content {
-  background: #fff;
-  border-radius: 18px;
-  box-shadow: 0 12px 36px rgba(80, 80, 120, 0.18);
-  padding: 32px 24px 24px 24px;
-  min-width: 340px;
-  max-width: 95vw;
+  position: relative;
+  background: radial-gradient(circle at top, #ffffff 0%, #f0ecff 52%, #fdf7fb 100%);
+  border-radius: 32px;
+  border: 1px solid rgba(147, 51, 234, 0.16);
+  box-shadow: 0 32px 110px rgba(99, 102, 241, 0.18);
+  padding: 34px 32px;
+  min-width: 360px;
+  max-width: 520px;
+  width: min(95vw, 520px);
   max-height: 95vh;
   display: flex;
   flex-direction: column;
   align-items: center;
   z-index: 10000;
+  transform: translateY(16px) scale(0.94);
+  opacity: 0;
+  animation: popupScaleIn 0.18s ease-out forwards;
+}
+.modal-close-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.14);
+  color: #dc2626;
+  font-size: 1.2rem;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.2s;
+}
+.modal-close-btn:hover {
+  background: rgba(239, 68, 68, 0.24);
+  transform: translateY(-1px);
+}
+.logout-confirm-modal {
+  padding: 44px 36px 32px;
+  gap: 24px;
+}
+.logout-confirm-header {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 16px;
+}
+.logout-confirm-icon {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background: radial-gradient(circle at top left, rgba(236, 72, 153, 0.24), rgba(124, 58, 237, 0.14));
+  display: grid;
+  place-items: center;
+}
+.logout-confirm-header h3 {
+  margin: 0;
+  font-size: 1.55rem;
+  color: #311d6f;
+}
+.logout-confirm-subtitle {
+  margin: 6px 0 0;
+  color: #5b21b6;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+.logout-confirm-body {
+  margin: 0;
+  color: #4338ca;
+  text-align: center;
+  line-height: 1.85;
+  font-size: 1rem;
+}
+.logout-confirm-actions {
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 26px;
+  width: 100%;
+}
+.logout-confirm-actions button {
+  min-width: 140px;
+  flex: 1;
+  height: 48px;
+  border-radius: 999px;
+  padding: 0 22px;
+  font-weight: 700;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.logout-confirm-actions button:hover {
+  transform: translateY(-1px);
+}
+.logout-confirm-primary {
+  background: linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%);
+  color: #fff;
+  border: 1px solid transparent;
+  box-shadow: 0 14px 34px rgba(124, 58, 237, 0.2);
+}
+.logout-confirm-primary:hover {
+  background: linear-gradient(135deg, #7c3aed 0%, #db2777 100%);
+}
+.cancel-btn {
+  background: #eef2ff;
+  color: #312e81;
+  border: 1px solid #c7d2fe;
+}
+.cancel-btn:hover {
+  background: #e0e7ff;
+}
+@keyframes popupFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes popupScaleIn {
+  from {
+    transform: translateY(18px) scale(0.92);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+@media (max-width: 420px) {
+  .logout-confirm-actions {
+    flex-direction: column;
+  }
+}
+@media (max-width: 420px) {
+  .logout-confirm-actions {
+    flex-direction: column;
+  }
 }
 /* ===== ABOUT US PAGE CARDS ===== */
 .about-container {
@@ -1170,26 +1299,45 @@ button {
   flex-wrap: wrap;
   gap: 10px;
   margin-bottom: 18px;
-  font-size: 42px;
+  font-size: 48px;
   letter-spacing: 0.04em;
   min-height: 56px;
   white-space: nowrap;
-  overflow: hidden;
+  overflow: visible;
   opacity: 0;
   transform: translateY(18px);
   animation: fadeInUp 0.8s ease-out forwards 0.1s;
 }
 
 .hero-greeting-label {
+  font-family: "Segoe Print", "Comic Sans MS", "Segoe UI", sans-serif;
+  font-size: inherit;
+  display: inline-block;
   font-weight: 700;
-  color: rgba(255, 255, 255, 0.78);
+  color: rgba(255, 255, 255, 0.92);
   text-transform: none;
+  letter-spacing: 0.02em;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.14);
+}
+
+.hero-greeting-name {
+  font-family: "Segoe Print", "Comic Sans MS", "Segoe UI", sans-serif;
+  font-size: inherit;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.01em;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.14);
+  display: inline-block;
 }
 
 .hero-greeting-cursor {
   display: inline-block;
-  width: 0;
+  width: auto;
   margin-left: 8px;
+  transform: translateY(-1px);
+  font-weight: 900;
+  color: #fff;
+  animation: blinkCursor 0.7s step-end infinite;
 }
 
 .hero-greeting-cursor::before {
@@ -1197,11 +1345,6 @@ button {
   font-weight: 900;
   color: #fff;
   animation: blinkCursor 0.8s step-end infinite;
-}
-
-.hero-greeting-name {
-  font-weight: 900;
-  color: #fff;
 }
 
 @keyframes blinkCursor {

@@ -13,6 +13,7 @@ function Navbar() {
   const location = useLocation();
   const popupRef = useRef(null);
   const [showProfile, setShowProfile] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   // Always use user.profile_image for display, keep in sync with localStorage
   const [cropModalImg, setCropModalImg] = useState(null);
@@ -41,12 +42,18 @@ function Navbar() {
   const userDisplayName = getUserDisplayName(user);
   const userInitial = userDisplayName ? userDisplayName[0].toUpperCase() : "U";
 
-  const handleLogout = () => {
+  const performLogout = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
+    window.dispatchEvent(new Event("authchange"));
     setUser(null);
     setShowProfile(false);
+    setShowLogoutConfirm(false);
     navigate("/");
+  };
+
+  const handleLogout = () => {
+    setShowLogoutConfirm(true);
   };
 
   useEffect(() => {
@@ -292,6 +299,43 @@ function Navbar() {
                     <span className="profile-popup-link-text">Logout</span>
                   </button>
 
+                </div>
+              )}
+
+              {showLogoutConfirm && (
+                <div className="modal-overlay" onClick={() => setShowLogoutConfirm(false)}>
+                  <div className="modal-content logout-confirm-modal" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      type="button"
+                      className="modal-close-btn"
+                      onClick={() => setShowLogoutConfirm(false)}
+                      aria-label="Close logout confirmation"
+                    >
+                      ×
+                    </button>
+                    <div className="logout-confirm-header">
+                      <div className="logout-confirm-icon">
+                        <LogOut size={26} color="#DC2626" />
+                      </div>
+                      <div>
+                        <h3>Confirm Logout</h3>
+                        <p className="logout-confirm-subtitle">
+                          You’re about to end your current session.
+                        </p>
+                      </div>
+                    </div>
+                    <p className="logout-confirm-body">
+                      If you continue, you will be signed out and redirected to the homepage.
+                    </p>
+                    <div className="logout-confirm-actions">
+                      <button className="mock-btn logout-confirm-primary" onClick={performLogout}>
+                        Yes, logout
+                      </button>
+                      <button className="mock-btn cancel-btn" onClick={() => setShowLogoutConfirm(false)}>
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

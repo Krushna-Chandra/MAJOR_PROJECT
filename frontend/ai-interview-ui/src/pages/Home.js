@@ -6,20 +6,41 @@ import Navbar from "../components/Navbar";
 function Home() {
   const navigate = useNavigate();
   const [typedName, setTypedName] = React.useState("");
+  const [storedUser, setStoredUser] = React.useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("user"));
+    } catch {
+      return null;
+    }
+  });
+
+  React.useEffect(() => {
+    const handleAuthChange = () => {
+      try {
+        setStoredUser(JSON.parse(localStorage.getItem("user")));
+      } catch {
+        setStoredUser(null);
+      }
+    };
+
+    window.addEventListener("authchange", handleAuthChange);
+    window.addEventListener("storage", handleAuthChange);
+
+    return () => {
+      window.removeEventListener("authchange", handleAuthChange);
+      window.removeEventListener("storage", handleAuthChange);
+    };
+  }, []);
 
   const userDisplayName = React.useMemo(() => {
-    try {
-      const user = JSON.parse(localStorage.getItem("user"));
-      if (!user) return "User";
-      if (user.first_name && user.last_name) return `${user.first_name} ${user.last_name}`;
-      if (user.first_name) return user.first_name;
-      if (user.last_name) return user.last_name;
-      if (user.email) return user.email.split("@")[0];
-      return "User";
-    } catch {
-      return "User";
-    }
-  }, []);
+    const user = storedUser;
+    if (!user) return "User";
+    if (user.first_name && user.last_name) return `${user.first_name} ${user.last_name}`;
+    if (user.first_name) return user.first_name;
+    if (user.last_name) return user.last_name;
+    if (user.email) return user.email.split("@")[0];
+    return "User";
+  }, [storedUser]);
 
   React.useEffect(() => {
     const observer = new IntersectionObserver(
@@ -39,7 +60,12 @@ function Home() {
   }, []);
 
   React.useEffect(() => {
-    const fullName = userDisplayName || "User";
+    if (!storedUser) {
+      setTypedName("");
+      return;
+    }
+
+    const fullName = userDisplayName;
     let currentIndex = 0;
     let timeoutId;
 
@@ -71,7 +97,7 @@ function Home() {
     }, 400);
 
     return () => window.clearTimeout(timeoutId);
-  }, [userDisplayName]);
+  }, [storedUser, userDisplayName]);
 
   return (
     <>
@@ -80,11 +106,13 @@ function Home() {
       {/* HERO - professional two-column layout */}
       <div className="mock-hero violet-hero reveal">
         <div style={{ maxWidth: 720 }}>
-          <div className="hero-greeting">
-            <span className="hero-greeting-label">Hello</span>
-            <span className="hero-greeting-name">{typedName}</span>
-            <span className="hero-greeting-cursor" />
-          </div>
+          {storedUser && (
+            <div className="hero-greeting">
+              <span className="hero-greeting-label">Welcome back</span>
+              <span className="hero-greeting-name">{typedName}</span>
+              <span className="hero-greeting-cursor" />
+            </div>
+          )}
           <h1>Practice. Improve. Land the Job.</h1>
           <p>
             APIS helps you prepare for interviews with AI-driven feedback and
