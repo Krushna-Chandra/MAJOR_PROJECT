@@ -8,16 +8,15 @@ import urllib.request
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
-from dotenv import load_dotenv
+from config import load_backend_env
 
-load_dotenv()
+load_backend_env()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3").strip()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip()
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant").strip()
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:8b").strip()
+OLLAMA_TIMEOUT_SECONDS = max(30, int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "300")))
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
 
 INTERVIEW_SESSIONS: Dict[str, Dict[str, Any]] = {}
 
@@ -190,6 +189,29 @@ def _http_post_json(
         raise ProviderError(f"Invalid JSON response from {url}") from exc
 
 
+def _http_get_json(
+    url: str,
+    headers: Optional[Dict[str, str]] = None,
+    timeout: int = 20
+) -> Dict[str, Any]:
+    request = urllib.request.Request(
+        url=url,
+        headers=_json_headers(headers),
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read().decode("utf-8")
+            return json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="ignore")
+        raise ProviderError(f"HTTP {exc.code} calling {url}: {body or exc.reason}") from exc
+    except urllib.error.URLError as exc:
+        raise ProviderError(f"Failed to reach {url}: {exc.reason}") from exc
+    except json.JSONDecodeError as exc:
+        raise ProviderError(f"Invalid JSON response from {url}") from exc
+
+
 def _extract_json_block(text: str) -> Dict[str, Any]:
     text = (text or "").strip()
     if not text:
@@ -313,6 +335,7 @@ def _target_subject(payload: Dict[str, Any]) -> str:
 
 def _safe_question_type(value: Any) -> str:
     allowed = {
+        "discovery",
         "introduction",
         "fundamental",
         "conceptual",
@@ -406,51 +429,20 @@ async def _call_gemini_json(prompt: str, temperature: float = 0.35) -> Dict[str,
     return _extract_json_block(text)
 
 
-async def _call_groq_json(prompt: str, temperature: float = 0.25) -> Dict[str, Any]:
-    if not GROQ_API_KEY:
-        raise ProviderError("GROQ_API_KEY is not configured.")
-
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    payload = {
-        "model": GROQ_MODEL,
-        "temperature": temperature,
-        "response_format": {"type": "json_object"},
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You are a structured interview assistant. "
-                    "Always return valid JSON and no markdown."
-                ),
-            },
-            {"role": "user", "content": prompt},
-        ],
-    }
-    data = await asyncio.to_thread(
-        _http_post_json,
-        url,
-        payload,
-        {"Authorization": f"Bearer {GROQ_API_KEY}"},
-        80,
-    )
-    text = (
-        data.get("choices", [{}])[0]
-        .get("message", {})
-        .get("content", "")
-    )
-    return _extract_json_block(text)
-
-
 async def _call_ollama_json(prompt: str, temperature: float = 0.2) -> Dict[str, Any]:
     url = f"{OLLAMA_BASE_URL}/api/generate"
+    effective_prompt = prompt
+    if OLLAMA_MODEL.lower().startswith("qwen3") and not prompt.lstrip().startswith("/no_think"):
+        # Qwen3 defaults to thinking mode, which is too slow for this app on CPU-only laptops.
+        effective_prompt = f"/no_think\n{prompt}"
     payload = {
         "model": OLLAMA_MODEL,
-        "prompt": prompt,
+        "prompt": effective_prompt,
         "stream": False,
         "format": "json",
         "options": {"temperature": temperature},
     }
-    data = await asyncio.to_thread(_http_post_json, url, payload, None, 120)
+    data = await asyncio.to_thread(_http_post_json, url, payload, None, OLLAMA_TIMEOUT_SECONDS)
     text = data.get("response", "")
     return _extract_json_block(text)
 
@@ -465,14 +457,70 @@ async def _generate_json_with_fallback(
         try:
             if provider == "gemini":
                 return await _call_gemini_json(prompt, temperature), "gemini"
-            if provider == "groq":
-                return await _call_groq_json(prompt, temperature), "groq"
             if provider == "ollama":
                 return await _call_ollama_json(prompt, temperature), "ollama"
         except ProviderError as exc:
             errors.append(f"{provider}: {exc}")
 
     raise ProviderError(" | ".join(errors) if errors else "No provider available.")
+
+
+def get_ai_provider_status() -> Dict[str, Any]:
+    ollama_status = {
+        "configured": bool(OLLAMA_BASE_URL and OLLAMA_MODEL),
+        "available": False,
+        "connection_checked": True,
+        "model": OLLAMA_MODEL,
+        "base_url": OLLAMA_BASE_URL,
+        "detail": "",
+    }
+
+    if ollama_status["configured"]:
+        try:
+            tags = _http_get_json(f"{OLLAMA_BASE_URL}/api/tags", timeout=5)
+            models = tags.get("models") or []
+            installed = [
+                _normalize_text(model.get("name") or model.get("model") or "")
+                for model in models
+                if isinstance(model, dict)
+            ]
+            ollama_status["available"] = True
+            if OLLAMA_MODEL and installed:
+                has_model = any(
+                    item == OLLAMA_MODEL or item.startswith(f"{OLLAMA_MODEL}:")
+                    for item in installed
+                )
+                ollama_status["detail"] = (
+                    f"Connected. Model '{OLLAMA_MODEL}' is installed."
+                    if has_model
+                    else f"Connected, but model '{OLLAMA_MODEL}' is not installed."
+                )
+            else:
+                ollama_status["detail"] = "Connected."
+        except ProviderError as exc:
+            ollama_status["detail"] = str(exc)
+    else:
+        ollama_status["detail"] = "OLLAMA_BASE_URL or OLLAMA_MODEL is missing."
+
+    gemini_configured = bool(GEMINI_API_KEY)
+    return {
+        "providers": {
+            "gemini": {
+                "configured": gemini_configured,
+                "available": gemini_configured,
+                "connection_checked": False,
+                "model": GEMINI_MODEL,
+                "detail": "API key loaded." if gemini_configured else "GEMINI_API_KEY is missing.",
+            },
+            "ollama": ollama_status,
+        },
+        "stage_order": {
+            "analysis": ["gemini", "ollama"],
+            "generation": ["gemini", "ollama"],
+            "evaluation": ["gemini", "ollama"],
+            "summary": ["gemini", "ollama"],
+        },
+    }
 
 
 async def _infer_role_blueprint(payload: Dict[str, Any]) -> Tuple[Dict[str, Any], str]:
@@ -514,7 +562,7 @@ Rules:
     try:
         blueprint, provider = await _generate_json_with_fallback(
             prompt,
-            ["gemini", "groq", "ollama"],
+            ["gemini", "ollama"],
             0.2,
         )
         normalized = {
@@ -837,9 +885,901 @@ def _heuristic_evaluation(question: Dict[str, Any], answer: str) -> Dict[str, An
         "missed_points": missed_points[:4],
         "suggested_answer": suggested_answer,
         "assistant_reply": (
-            "Thank you. Let us move to the next question."
+            "Thanks. Let’s move to the next question."
         ),
     }
+
+
+KNOWN_LANGUAGES = {
+    "python": "Python",
+    "java": "Java",
+    "javascript": "JavaScript",
+    "typescript": "TypeScript",
+    "node.js": "Node.js",
+    "nodejs": "Node.js",
+    "go": "Go",
+    "golang": "Go",
+    "c#": "C#",
+    "dotnet": ".NET",
+    ".net": ".NET",
+    "php": "PHP",
+    "ruby": "Ruby",
+    "rust": "Rust",
+    "kotlin": "Kotlin",
+}
+
+KNOWN_FRAMEWORKS = {
+    "fastapi": "FastAPI",
+    "django": "Django",
+    "flask": "Flask",
+    "spring boot": "Spring Boot",
+    "spring": "Spring",
+    "express": "Express.js",
+    "nestjs": "NestJS",
+    "nest": "NestJS",
+    "laravel": "Laravel",
+    "asp.net": "ASP.NET",
+    "gin": "Gin",
+}
+
+KNOWN_DATABASES = {
+    "postgresql": "PostgreSQL",
+    "postgres": "PostgreSQL",
+    "mysql": "MySQL",
+    "mongodb": "MongoDB",
+    "redis": "Redis",
+    "sqlite": "SQLite",
+    "oracle": "Oracle",
+    "sql server": "SQL Server",
+}
+
+KNOWN_TOOLS = {
+    "docker": "Docker",
+    "kubernetes": "Kubernetes",
+    "aws": "AWS",
+    "azure": "Azure",
+    "gcp": "GCP",
+    "rabbitmq": "RabbitMQ",
+    "kafka": "Kafka",
+    "graphql": "GraphQL",
+    "rest": "REST APIs",
+    "rest api": "REST APIs",
+    "rest apis": "REST APIs",
+}
+
+
+def _merge_unique(existing: List[str], new_items: List[str]) -> List[str]:
+    merged = list(existing or [])
+    for item in new_items or []:
+        value = _normalize_text(item)
+        if value and value not in merged:
+            merged.append(value)
+    return merged
+
+
+def _extract_known_terms(text: str, vocabulary: Dict[str, str]) -> List[str]:
+    lowered = text.lower()
+    matches: List[str] = []
+    for needle, label in vocabulary.items():
+        if needle in lowered and label not in matches:
+            matches.append(label)
+    return matches
+
+
+def _extract_preferred_language(text: str, languages: List[str]) -> str:
+    lowered = text.lower()
+    preference_markers = (
+        "prefer",
+        "preferred",
+        "most comfortable with",
+        "comfortable with",
+        "mainly",
+        "mostly",
+        "focus on",
+        "worked mostly with",
+        "use mostly",
+    )
+    for language in languages:
+        value = language.lower()
+        if any(f"{marker} {value}" in lowered for marker in preference_markers):
+            return language
+    return languages[0] if len(languages) == 1 else ""
+
+
+def _adaptive_role_interview_enabled(payload: Dict[str, Any]) -> bool:
+    category = _normalize_text(payload.get("category") or "").lower()
+    if category not in {"technical", "mock"}:
+        return False
+    selected_mode = payload.get("selected_mode") or (
+        "language" if payload.get("primary_language") else "role" if payload.get("job_role") else "general"
+    )
+    return _normalize_text(selected_mode).lower() == "role" and bool(_normalize_text(payload.get("job_role") or ""))
+
+
+def _adaptive_intro(payload: Dict[str, Any], question_count: int) -> str:
+    role = _normalize_text(payload.get("job_role") or "the selected role")
+    category = _normalize_text(payload.get("category") or "").lower()
+    if category == "mock":
+        return (
+            f"Hello, I’m your AI interviewer for this {role} mock interview. "
+            "I’ll start by understanding the technologies you feel most comfortable with, and then I’ll ask one question at a time like a real interviewer. "
+            "Because this is a mock interview, I may include a small HR or behavioral section near the end as well."
+        )
+    return (
+        f"Hello, I’m your AI interviewer for this {role} technical round. "
+        "I’ll first confirm the stack you’d like to focus on, and then I’ll ask one question at a time and adapt based on your answers. "
+        f"I’ll keep the interview technical and tailor the next {question_count} scored questions to your strengths."
+    )
+
+
+def _adaptive_discovery_question(payload: Dict[str, Any]) -> str:
+    role = _normalize_text(payload.get("job_role") or "this role")
+    role_lower = role.lower()
+    if any(keyword in role_lower for keyword in ("backend", "full stack", "full-stack", "fullstack", "software engineer", "software developer")):
+        return (
+            f"To start, which backend languages, frameworks, databases, or tools are you most comfortable with for this {role} role?"
+        )
+    return (
+        f"To start, which languages, frameworks, tools, or technical areas are you most comfortable with for this {role} role?"
+    )
+
+
+def _build_adaptive_state(payload: Dict[str, Any], role_blueprint: Dict[str, Any], question_count: int) -> Dict[str, Any]:
+    category = _normalize_text(payload.get("category") or "").lower()
+    primary_language = _normalize_text(payload.get("primary_language") or role_blueprint.get("language_focus") or "")
+    include_hr = category == "mock"
+    hr_target = 0 if not include_hr else (1 if question_count <= 5 else 2)
+    return {
+        "enabled": True,
+        "include_hr": include_hr,
+        "scored_question_target": question_count,
+        "discovery_questions_asked": 1,
+        "clarification_turns": 0,
+        "discovery_complete": False,
+        "preferred_language": primary_language,
+        "languages": [primary_language] if primary_language else [],
+        "frameworks": [],
+        "databases": [],
+        "tools": [],
+        "focus_areas": _safe_list(role_blueprint.get("core_areas"))[:6],
+        "covered_topics": [],
+        "scored_questions_answered": 0,
+        "technical_questions_answered": 0,
+        "hr_questions_answered": 0,
+        "hr_question_target": hr_target,
+        "role_label": _normalize_text(role_blueprint.get("role_label") or payload.get("job_role") or "Technical Role"),
+        "confidence_summary": "",
+    }
+
+
+def _append_session_question(session: Dict[str, Any], question_payload: Dict[str, Any]) -> Dict[str, Any]:
+    question_text = _normalize_text(question_payload.get("question") or "")
+    if not question_text:
+        raise ProviderError("Generated question text was empty.")
+
+    question = {
+        "id": len(session.get("questions", [])) + 1,
+        "question": question_text,
+        "question_type": _safe_question_type(question_payload.get("question_type")),
+        "expected_points": _safe_list(question_payload.get("expected_points"))[:5],
+        "evaluation_focus": _safe_list(question_payload.get("evaluation_focus"))[:4],
+        "count_towards_score": bool(question_payload.get("count_towards_score", True)),
+        "topic_tag": _normalize_text(question_payload.get("topic_tag") or ""),
+    }
+
+    session.setdefault("questions", []).append(question)
+    session.setdefault("question_outline", []).append(
+        {
+            "id": question["id"],
+            "question": question["question"],
+            "question_type": question["question_type"],
+        }
+    )
+    return question
+
+
+def _adaptive_total_questions(session: Dict[str, Any]) -> int:
+    state = session.get("meta", {}).get("adaptive_state") or {}
+    if not state.get("enabled"):
+        return len(session.get("questions", []))
+    return max(
+        len(session.get("questions", [])),
+        int(state.get("scored_question_target", 0)) + max(1, int(state.get("discovery_questions_asked", 1))),
+    )
+
+
+def _adaptive_state_summary(state: Dict[str, Any]) -> str:
+    return "\n".join(
+        [
+            f"Role label: {state.get('role_label') or 'Not specified'}",
+            f"Preferred language: {state.get('preferred_language') or 'Not confirmed'}",
+            f"Languages mentioned: {', '.join(state.get('languages') or []) or 'None yet'}",
+            f"Frameworks mentioned: {', '.join(state.get('frameworks') or []) or 'None yet'}",
+            f"Databases mentioned: {', '.join(state.get('databases') or []) or 'None yet'}",
+            f"Tools mentioned: {', '.join(state.get('tools') or []) or 'None yet'}",
+            f"Focus areas: {', '.join(state.get('focus_areas') or []) or 'None yet'}",
+            f"Confidence summary: {state.get('confidence_summary') or 'Not confirmed yet'}",
+            f"Covered topics: {', '.join(state.get('covered_topics') or []) or 'None yet'}",
+            f"Technical questions answered: {state.get('technical_questions_answered', 0)}",
+            f"HR questions answered: {state.get('hr_questions_answered', 0)}",
+        ]
+    )
+
+
+def _fallback_stack_analysis(answer_text: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    languages = _extract_known_terms(answer_text, KNOWN_LANGUAGES)
+    frameworks = _extract_known_terms(answer_text, KNOWN_FRAMEWORKS)
+    databases = _extract_known_terms(answer_text, KNOWN_DATABASES)
+    tools = _extract_known_terms(answer_text, KNOWN_TOOLS)
+    preferred_language = _extract_preferred_language(answer_text, languages)
+
+    if not preferred_language and frameworks:
+        framework_to_language = {
+            "FastAPI": "Python",
+            "Django": "Python",
+            "Flask": "Python",
+            "Spring Boot": "Java",
+            "Spring": "Java",
+            "Express.js": "JavaScript",
+            "NestJS": "TypeScript",
+            "Laravel": "PHP",
+            "ASP.NET": "C#",
+            "Gin": "Go",
+        }
+        for framework in frameworks:
+            implied = framework_to_language.get(framework)
+            if implied:
+                preferred_language = implied
+                if implied not in languages:
+                    languages.append(implied)
+                break
+
+    if not preferred_language and payload.get("primary_language"):
+        preferred_language = _normalize_text(payload.get("primary_language"))
+        if preferred_language and preferred_language not in languages:
+            languages.append(preferred_language)
+
+    needs_clarification = False
+    clarification_question = ""
+    if len(languages) > 1 and not _extract_preferred_language(answer_text, languages):
+        needs_clarification = True
+        clarification_question = (
+            f"You mentioned {', '.join(languages[:3])}. Which one would you like me to focus on first for this interview?"
+        )
+    elif not languages and not frameworks:
+        needs_clarification = True
+        clarification_question = (
+            "Which backend language or framework would you like me to focus on first, and what stack have you actually used?"
+        )
+
+    focus_areas = _merge_unique(frameworks, databases)
+    focus_areas = _merge_unique(focus_areas, tools)
+    if preferred_language:
+        focus_areas = _merge_unique([preferred_language], focus_areas)
+
+    stack_summary = ", ".join(focus_areas[:4]) or "your preferred stack"
+    acknowledgement = (
+        f"Thanks. I will tailor the interview around {stack_summary}."
+        if stack_summary
+        else "Thanks. I will tailor the interview around what you are most comfortable with."
+    )
+
+    return {
+        "preferred_language": preferred_language,
+        "languages": languages,
+        "frameworks": frameworks,
+        "databases": databases,
+        "tools": tools,
+        "focus_areas": focus_areas,
+        "confidence_summary": f"Candidate appears most comfortable with {stack_summary}." if stack_summary else "",
+        "needs_clarification": needs_clarification,
+        "clarification_question": clarification_question,
+        "acknowledgement": acknowledgement,
+    }
+
+
+async def _analyze_discovery_answer(session: Dict[str, Any], answer_text: str) -> Tuple[Dict[str, Any], str]:
+    payload = session.get("context", {})
+    role_blueprint = session.get("meta", {}).get("role_blueprint") or {}
+    prompt = f"""
+You are helping an AI interviewer discover the candidate's preferred technology stack.
+
+Interview context:
+{_context_summary(payload)}
+
+Role blueprint:
+- Role label: {role_blueprint.get("role_label") or payload.get("job_role") or "Not specified"}
+- Core areas: {', '.join(role_blueprint.get("core_areas") or [])}
+- Tech stack hints: {', '.join(role_blueprint.get("tech_stack") or [])}
+
+Candidate answer:
+{answer_text}
+
+Return valid JSON with this exact shape:
+{{
+  "preferred_language": "single best language to focus on first, or empty string",
+  "languages": ["languages explicitly mentioned or directly implied"],
+  "frameworks": ["frameworks explicitly mentioned"],
+  "databases": ["databases explicitly mentioned"],
+  "tools": ["infra or platform tools explicitly mentioned"],
+  "focus_areas": ["the most useful technical areas to focus on next"],
+  "confidence_summary": "one sentence on what the candidate seems strongest in",
+  "needs_clarification": false,
+  "clarification_question": "short follow-up question if the preference is still unclear",
+  "acknowledgement": "one short human-like acknowledgement"
+}}
+
+Rules:
+- Do not assume a language unless the candidate mentioned it or a framework directly implies it.
+- If the candidate mentions multiple languages and no preference, ask which one to focus on first.
+- Keep the acknowledgement warm and professional.
+- Do not use markdown.
+"""
+
+    try:
+        analysis, provider = await _generate_json_with_fallback(prompt, ["gemini", "ollama"], 0.1)
+        normalized = {
+            "preferred_language": _normalize_text(analysis.get("preferred_language") or ""),
+            "languages": _safe_list(analysis.get("languages")),
+            "frameworks": _safe_list(analysis.get("frameworks")),
+            "databases": _safe_list(analysis.get("databases")),
+            "tools": _safe_list(analysis.get("tools")),
+            "focus_areas": _safe_list(analysis.get("focus_areas")),
+            "confidence_summary": _normalize_text(analysis.get("confidence_summary") or ""),
+            "needs_clarification": bool(analysis.get("needs_clarification")),
+            "clarification_question": _normalize_text(analysis.get("clarification_question") or ""),
+            "acknowledgement": _normalize_text(analysis.get("acknowledgement") or ""),
+        }
+        if not any(
+            [
+                normalized["preferred_language"],
+                normalized["languages"],
+                normalized["frameworks"],
+                normalized["databases"],
+                normalized["tools"],
+            ]
+        ):
+            raise ProviderError("Discovery analysis did not return a usable stack profile.")
+        return normalized, provider
+    except ProviderError:
+        return _fallback_stack_analysis(answer_text, payload), "fallback"
+
+
+def _apply_discovery_analysis(state: Dict[str, Any], analysis: Dict[str, Any]) -> None:
+    state["preferred_language"] = _normalize_text(
+        analysis.get("preferred_language") or state.get("preferred_language") or ""
+    )
+    state["languages"] = _merge_unique(state.get("languages") or [], _safe_list(analysis.get("languages")))
+    state["frameworks"] = _merge_unique(state.get("frameworks") or [], _safe_list(analysis.get("frameworks")))
+    state["databases"] = _merge_unique(state.get("databases") or [], _safe_list(analysis.get("databases")))
+    state["tools"] = _merge_unique(state.get("tools") or [], _safe_list(analysis.get("tools")))
+    state["focus_areas"] = _merge_unique(state.get("focus_areas") or [], _safe_list(analysis.get("focus_areas")))
+    state["confidence_summary"] = _normalize_text(
+        analysis.get("confidence_summary") or state.get("confidence_summary") or ""
+    )
+
+
+def _adaptive_focus_candidates(session: Dict[str, Any], last_question: Optional[Dict[str, Any]] = None) -> List[str]:
+    state = session.get("meta", {}).get("adaptive_state") or {}
+    role_blueprint = session.get("meta", {}).get("role_blueprint") or {}
+    selected_options = _safe_list(session.get("context", {}).get("selected_options") or [])
+    candidates: List[str] = []
+    candidates = _merge_unique(candidates, [state.get("preferred_language") or ""])
+    candidates = _merge_unique(candidates, state.get("frameworks") or [])
+    candidates = _merge_unique(candidates, state.get("databases") or [])
+    candidates = _merge_unique(candidates, state.get("tools") or [])
+    candidates = _merge_unique(candidates, selected_options)
+    candidates = _merge_unique(candidates, _safe_list(role_blueprint.get("tech_stack")))
+    candidates = _merge_unique(candidates, _safe_list(role_blueprint.get("core_areas")))
+    if last_question:
+        candidates = _merge_unique(candidates, [_normalize_text(last_question.get("topic_tag") or "")])
+    return [item for item in candidates if item]
+
+
+def _next_adaptive_track(state: Dict[str, Any]) -> str:
+    if not state.get("include_hr"):
+        return "technical"
+    if int(state.get("hr_questions_answered", 0)) >= int(state.get("hr_question_target", 0)):
+        return "technical"
+    technical_before_hr = max(2, int(state.get("scored_question_target", 0)) - int(state.get("hr_question_target", 0)))
+    if int(state.get("technical_questions_answered", 0)) >= technical_before_hr:
+        return "hr"
+    return "technical"
+
+
+def _next_uncovered_topic(session: Dict[str, Any], last_question: Optional[Dict[str, Any]] = None) -> str:
+    state = session.get("meta", {}).get("adaptive_state") or {}
+    covered = {item.lower() for item in state.get("covered_topics") or []}
+    last_topic = _normalize_text((last_question or {}).get("topic_tag") or "")
+    for candidate in _adaptive_focus_candidates(session, last_question):
+        lowered = candidate.lower()
+        if lowered not in covered and lowered != last_topic.lower():
+            return candidate
+    return last_topic or _normalize_text(state.get("preferred_language") or "") or _normalize_text(session.get("context", {}).get("job_role") or "backend fundamentals")
+
+
+def _fallback_adaptive_question(
+    session: Dict[str, Any],
+    last_question: Optional[Dict[str, Any]],
+    evaluation: Optional[Dict[str, Any]],
+    desired_track: str,
+) -> Dict[str, Any]:
+    role = _normalize_text(session.get("context", {}).get("job_role") or "the role")
+    score = int((evaluation or {}).get("score") or 0)
+    topic = _next_uncovered_topic(session, last_question)
+
+    if desired_track == "hr":
+        return {
+            "assistant_reply": "Thank you. I’d also like to understand how you work with people, pressure, and ownership.",
+            "question": (
+                f"Tell me about a time you had to explain a technical decision, handle pressure, or coordinate with others while working as a {role}. "
+                "What was the situation, what did you do, and what happened?"
+            ),
+            "question_type": "behavioral",
+            "expected_points": [
+                "clear situation",
+                "specific actions taken",
+                "communication or prioritization choices",
+                "result and learning",
+            ],
+            "evaluation_focus": ["structure", "ownership", "communication"],
+            "topic_tag": "behavioral ownership",
+        }
+
+    if score < 55:
+        return {
+            "assistant_reply": "Thanks, that helps. Let’s keep it a little more concrete and stay on the same stack for a moment.",
+            "question": f"Can you walk me through a real backend example where you used {topic}, including what you built and the main trade-offs?",
+            "question_type": "practical",
+            "expected_points": [
+                "clear project context",
+                "specific implementation steps",
+                "relevant backend concepts",
+                "trade-offs or result",
+            ],
+            "evaluation_focus": ["specificity", "practical detail", "clarity"],
+            "topic_tag": topic,
+        }
+
+    if score >= 80:
+        return {
+            "assistant_reply": "Nice, that was clear. Let’s go one level deeper there.",
+            "question": f"What edge cases, failure modes, or production trade-offs do you watch for when working with {topic} in a backend system?",
+            "question_type": "scenario",
+            "expected_points": [
+                "important edge cases",
+                "failure handling or resilience",
+                "trade-offs",
+                "practical mitigation steps",
+            ],
+            "evaluation_focus": ["depth", "real-world awareness", "clarity"],
+            "topic_tag": topic,
+        }
+
+    next_topic = _next_uncovered_topic(session, last_question)
+    return {
+        "assistant_reply": "Good. Let’s move to another area you’re likely to face in a real backend interview.",
+        "question": f"How would you design, implement, or troubleshoot {next_topic} for a {role} service?",
+        "question_type": "practical",
+        "expected_points": [
+            "clear approach",
+            "relevant tools or concepts",
+            "real implementation detail",
+            "trade-offs or debugging awareness",
+        ],
+        "evaluation_focus": ["technical reasoning", "practicality", "clarity"],
+        "topic_tag": next_topic,
+    }
+
+
+async def _generate_adaptive_question(
+    session: Dict[str, Any],
+    last_question: Optional[Dict[str, Any]],
+    answer_text: str,
+    evaluation: Optional[Dict[str, Any]],
+) -> Tuple[Dict[str, Any], str]:
+    state = session.get("meta", {}).get("adaptive_state") or {}
+    desired_track = _next_adaptive_track(state)
+    last_score = int((evaluation or {}).get("score") or 0)
+    role = _normalize_text(session.get("context", {}).get("job_role") or "the selected role")
+    prompt = f"""
+You are running a live adaptive AI interview one question at a time.
+
+Interview context:
+{_context_summary(session.get("context", {}))}
+
+Discovered candidate profile:
+{_adaptive_state_summary(state)}
+
+Recent turn:
+- Previous question: {(last_question or {}).get("question") or "None"}
+- Previous topic: {(last_question or {}).get("topic_tag") or "None"}
+- Candidate answer: {answer_text or "No answer captured"}
+- Last score: {last_score}
+- Last feedback: {(evaluation or {}).get("feedback") or "Not available"}
+- Last gaps: {json.dumps((evaluation or {}).get("gaps") or [], ensure_ascii=False)}
+
+Remaining scored questions after the next turn: {max(0, int(state.get("scored_question_target", 0)) - int(state.get("scored_questions_answered", 0)) - 1)}
+Desired next track: {desired_track}
+Target role: {role}
+
+Return valid JSON with this exact shape:
+{{
+  "assistant_reply": "one short conversational bridge",
+  "question": "exactly one next interview question",
+  "question_type": "fundamental | conceptual | practical | scenario | behavioral",
+  "expected_points": ["3 to 5 concise expected answer points"],
+  "evaluation_focus": ["3 concise evaluation criteria"],
+  "topic_tag": "short topic label"
+}}
+
+Rules:
+- Ask exactly one question.
+- Sound like a curious, calm, and supportive human interviewer.
+- Keep assistant_reply gentle, natural, and short, like a real interviewer speaking conversationally.
+- If desired next track is technical, do not ask HR, self-introduction, motivation, or strengths and weaknesses questions.
+- If desired next track is technical and the last score was below 55, ask a simpler follow-up or ask for a concrete example on the same stack.
+- If desired next track is technical and the last score was 80 or above, go one level deeper on the same topic or a closely related backend concern.
+- If desired next track is technical and the last score was between 55 and 79, move to the next relevant backend topic.
+- If desired next track is hr, ask one realistic behavioral or communication question relevant to the role.
+- Prefer the candidate's preferred language, frameworks, and tools when known.
+- Avoid repeating covered topics unless you are intentionally following up on a weak answer.
+- Keep it professional, specific, and natural.
+- Do not use markdown.
+"""
+
+    try:
+        generated, provider = await _generate_json_with_fallback(prompt, ["gemini", "ollama"], 0.2)
+        question = {
+            "assistant_reply": _normalize_text(generated.get("assistant_reply") or ""),
+            "question": _normalize_text(generated.get("question") or ""),
+            "question_type": _safe_question_type(generated.get("question_type") or ("behavioral" if desired_track == "hr" else "practical")),
+            "expected_points": _safe_list(generated.get("expected_points"))[:5],
+            "evaluation_focus": _safe_list(generated.get("evaluation_focus"))[:4],
+            "topic_tag": _normalize_text(generated.get("topic_tag") or _next_uncovered_topic(session, last_question)),
+        }
+        if desired_track == "hr":
+            question["question_type"] = "behavioral"
+        elif question["question_type"] == "behavioral":
+            question["question_type"] = "practical"
+        if not question["question"] or not question["expected_points"]:
+            raise ProviderError("Adaptive question generation returned incomplete data.")
+        return question, provider
+    except ProviderError:
+        return _fallback_adaptive_question(session, last_question, evaluation, desired_track), "fallback"
+
+
+def _register_scored_turn(state: Dict[str, Any], question: Dict[str, Any]) -> None:
+    if not question.get("count_towards_score", True):
+        return
+    state["scored_questions_answered"] = int(state.get("scored_questions_answered", 0)) + 1
+    topic = _normalize_text(question.get("topic_tag") or "")
+    if topic:
+        state["covered_topics"] = _merge_unique(state.get("covered_topics") or [], [topic])
+    if question.get("question_type") == "behavioral":
+        state["hr_questions_answered"] = int(state.get("hr_questions_answered", 0)) + 1
+    else:
+        state["technical_questions_answered"] = int(state.get("technical_questions_answered", 0)) + 1
+
+
+def _record_turn_result(
+    session: Dict[str, Any],
+    question_index: int,
+    question: Dict[str, Any],
+    answer_text: str,
+    evaluation: Dict[str, Any],
+    provider_used: str,
+    next_question: Optional[Dict[str, Any]] = None,
+    is_complete: bool = False,
+) -> Dict[str, Any]:
+    result = {
+        "question_id": question["id"],
+        "question": question["question"],
+        "question_type": question.get("question_type", "practical"),
+        "answer": answer_text,
+        "score": max(0, min(100, int(evaluation.get("score", 0)))),
+        "feedback": _normalize_text(evaluation.get("feedback") or ""),
+        "strengths": _safe_list(evaluation.get("strengths"))[:3],
+        "gaps": _safe_list(evaluation.get("gaps"))[:3],
+        "matched_points": _safe_list(evaluation.get("matched_points"))[:4],
+        "missed_points": _safe_list(evaluation.get("missed_points"))[:4],
+        "suggested_answer": _normalize_text(evaluation.get("suggested_answer") or ""),
+        "assistant_reply": _normalize_text(evaluation.get("assistant_reply") or "Thank you. Let us continue."),
+        "provider": provider_used,
+        "count_towards_score": bool(question.get("count_towards_score", True)),
+    }
+
+    answers = session.setdefault("answers", [])
+    evaluations = session.setdefault("evaluations", [])
+    if len(answers) > question_index:
+        answers[question_index] = answer_text
+    else:
+        answers.append(answer_text)
+
+    if len(evaluations) > question_index:
+        evaluations[question_index] = result
+    else:
+        evaluations.append(result)
+
+    return {
+        **result,
+        "question_index": question_index,
+        "is_complete": is_complete,
+        "next_question": next_question["question"] if next_question else None,
+        "next_question_type": next_question.get("question_type") if next_question else None,
+        "progress": {
+            "current": question_index + 1,
+            "total": _adaptive_total_questions(session),
+        },
+        "question_outline": session.get("question_outline", []),
+    }
+
+
+def _scored_evaluations(session: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return [
+        item
+        for item in session.get("evaluations", [])
+        if item.get("count_towards_score", True)
+    ]
+
+
+async def _create_adaptive_interview_session(
+    payload: Dict[str, Any],
+    question_count: int,
+    difficulty: str,
+    role_blueprint: Dict[str, Any],
+    blueprint_provider: str,
+) -> Dict[str, Any]:
+    session_id = str(uuid.uuid4())
+    adaptive_state = _build_adaptive_state(payload, role_blueprint, question_count)
+    provider_meta = {
+        "generation_provider": "fallback",
+        "evaluation_provider": "fallback",
+        "analysis_provider": blueprint_provider,
+    }
+
+    session = {
+        "session_id": session_id,
+        "created_at": time.time(),
+        "context": payload,
+        "assistant_intro": _adaptive_intro(payload, question_count),
+        "questions": [],
+        "answers": [],
+        "evaluations": [],
+        "providers": provider_meta,
+        "meta": {
+            "difficulty": difficulty,
+            "config_mode": payload.get("config_mode") or "question",
+            "practice_type": payload.get("practice_type") or "practice",
+            "interview_mode_time": payload.get("interview_mode_time"),
+            "time_mode_interval": payload.get("time_mode_interval"),
+            "selected_mode": payload.get("selected_mode"),
+            "role_blueprint": role_blueprint,
+            "adaptive_state": adaptive_state,
+        },
+        "question_outline": [],
+    }
+
+    first_question = _append_session_question(
+        session,
+        {
+            "question": _adaptive_discovery_question(payload),
+            "question_type": "discovery",
+            "expected_points": [
+                "languages the candidate knows",
+                "frameworks or backend tools used",
+                "preferred stack to focus on",
+            ],
+            "evaluation_focus": ["clarity", "stack identification", "specificity"],
+            "count_towards_score": False,
+            "topic_tag": "stack discovery",
+        },
+    )
+
+    INTERVIEW_SESSIONS[session_id] = session
+    return {
+        "session_id": session_id,
+        "assistant_intro": session["assistant_intro"],
+        "total_questions": _adaptive_total_questions(session),
+        "current_question": first_question["question"],
+        "current_question_type": first_question["question_type"],
+        "providers": provider_meta,
+        "meta": session["meta"],
+        "question_outline": session["question_outline"],
+    }
+
+
+async def _evaluate_adaptive_interview_answer(
+    session: Dict[str, Any],
+    question_index: int,
+    question: Dict[str, Any],
+    answer_text: str,
+) -> Dict[str, Any]:
+    state = session.get("meta", {}).get("adaptive_state") or {}
+
+    if question.get("question_type") == "discovery":
+        analysis, provider_used = await _analyze_discovery_answer(session, answer_text)
+        _apply_discovery_analysis(state, analysis)
+        session["providers"]["analysis_provider"] = provider_used
+
+        acknowledgement = _normalize_text(
+            analysis.get("acknowledgement")
+            or "Thanks, that gives me a clear direction for the rest of the interview."
+        )
+        matched_points = _merge_unique(_safe_list(analysis.get("languages")), _safe_list(analysis.get("frameworks")))
+        matched_points = _merge_unique(matched_points, _safe_list(analysis.get("databases")))
+        matched_points = _merge_unique(matched_points, _safe_list(analysis.get("tools")))
+
+        evaluation = {
+            "score": 0,
+            "feedback": f"{acknowledgement} This discovery step is only to tailor the interview, so it does not affect your score.",
+            "strengths": [
+                "You clarified your preferred stack for the interviewer.",
+                "The interview can now adapt to your real background.",
+            ],
+            "gaps": (
+                ["Your preferred stack still needs one quick clarification."]
+                if analysis.get("needs_clarification")
+                else []
+            ),
+            "matched_points": matched_points[:4],
+            "missed_points": [],
+            "suggested_answer": "Discovery turns are used only to tailor the interview and do not affect scoring.",
+            "assistant_reply": acknowledgement,
+        }
+
+        next_question = None
+        if analysis.get("needs_clarification") and int(state.get("clarification_turns", 0)) < 1:
+            state["clarification_turns"] = int(state.get("clarification_turns", 0)) + 1
+            state["discovery_questions_asked"] = int(state.get("discovery_questions_asked", 1)) + 1
+            next_question = _append_session_question(
+                session,
+                {
+                    "question": _normalize_text(
+                        analysis.get("clarification_question")
+                        or "Which language or framework would you like me to focus on first?"
+                    ),
+                    "question_type": "discovery",
+                    "expected_points": [
+                        "clear preferred language or framework",
+                        "preferred backend direction",
+                        "real experience reference",
+                    ],
+                    "evaluation_focus": ["clarity", "specificity", "focus"],
+                    "count_towards_score": False,
+                    "topic_tag": "stack clarification",
+                },
+            )
+        else:
+            state["discovery_complete"] = True
+            generated_question, provider = await _generate_adaptive_question(session, question, answer_text, evaluation)
+            session["providers"]["generation_provider"] = provider
+            evaluation["assistant_reply"] = _normalize_text(
+                generated_question.get("assistant_reply") or acknowledgement
+            )
+            next_question = _append_session_question(
+                session,
+                {
+                    **generated_question,
+                    "count_towards_score": True,
+                },
+            )
+
+        return _record_turn_result(
+            session,
+            question_index,
+            question,
+            answer_text,
+            evaluation,
+            provider_used,
+            next_question=next_question,
+            is_complete=False,
+        )
+
+    context_summary = _context_summary(session["context"])
+    expected_points = question.get("expected_points") or []
+    evaluation_focus = question.get("evaluation_focus") or []
+    prompt = f"""
+You are evaluating a spoken interview answer using approximate semantic matching.
+
+Interview context:
+{context_summary}
+
+Discovered candidate profile:
+{_adaptive_state_summary(state)}
+
+Question:
+{question["question"]}
+
+Expected answer points:
+{json.dumps(expected_points, ensure_ascii=False)}
+
+Evaluation focus:
+{json.dumps(evaluation_focus, ensure_ascii=False)}
+
+Candidate answer:
+{answer_text}
+
+Return valid JSON:
+{{
+  "score": 0,
+  "feedback": "2 to 4 sentence evaluation",
+  "strengths": ["up to 3 concise strengths"],
+  "gaps": ["up to 3 concise gaps"],
+  "matched_points": ["expected points that were covered"],
+  "missed_points": ["expected points that were not covered"],
+  "suggested_answer": "short improved answer guidance",
+  "assistant_reply": "one short warm spoken response before the next question"
+}}
+
+Rules:
+- Evaluate approximately, not by exact wording.
+- Reward relevant meaning even if phrasing is imperfect.
+- Be practical and interview-focused.
+- Do not use markdown.
+"""
+
+    provider_used = session["providers"].get("evaluation_provider", "fallback")
+    try:
+        evaluation, provider_used = await _generate_json_with_fallback(
+            prompt,
+            ["gemini", "ollama"],
+            0.2,
+        )
+    except ProviderError:
+        evaluation = _heuristic_evaluation(question, answer_text)
+        provider_used = "fallback"
+
+    session["providers"]["evaluation_provider"] = provider_used
+    if provider_used != "fallback":
+        heuristic_defaults = _heuristic_evaluation(question, answer_text)
+        evaluation = {
+            "score": int(evaluation.get("score", heuristic_defaults["score"])),
+            "feedback": _normalize_text(evaluation.get("feedback") or heuristic_defaults["feedback"]),
+            "strengths": _safe_list(evaluation.get("strengths")) or heuristic_defaults["strengths"],
+            "gaps": _safe_list(evaluation.get("gaps")) or heuristic_defaults["gaps"],
+            "matched_points": _safe_list(evaluation.get("matched_points")) or heuristic_defaults["matched_points"],
+            "missed_points": _safe_list(evaluation.get("missed_points")) or heuristic_defaults["missed_points"],
+            "suggested_answer": _normalize_text(evaluation.get("suggested_answer") or heuristic_defaults["suggested_answer"]),
+            "assistant_reply": _normalize_text(evaluation.get("assistant_reply") or "Thanks. Let’s continue."),
+        }
+
+    _register_scored_turn(state, question)
+    if int(state.get("scored_questions_answered", 0)) >= int(state.get("scored_question_target", 0)):
+        return _record_turn_result(
+            session,
+            question_index,
+            question,
+            answer_text,
+            evaluation,
+            provider_used,
+            next_question=None,
+            is_complete=True,
+        )
+
+    generated_question, provider = await _generate_adaptive_question(session, question, answer_text, evaluation)
+    session["providers"]["generation_provider"] = provider
+    evaluation["assistant_reply"] = _normalize_text(
+        generated_question.get("assistant_reply") or evaluation.get("assistant_reply") or "Thanks. Let’s continue."
+    )
+    next_question = _append_session_question(
+        session,
+        {
+            **generated_question,
+            "count_towards_score": True,
+        },
+    )
+
+    return _record_turn_result(
+        session,
+        question_index,
+        question,
+        answer_text,
+        evaluation,
+        provider_used,
+        next_question=next_question,
+        is_complete=False,
+    )
 
 
 async def create_interview_session(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -850,6 +1790,14 @@ async def create_interview_session(payload: Dict[str, Any]) -> Dict[str, Any]:
     target_subject = target_subject or payload.get("job_role") or payload.get("primary_language") or "the selected interview focus"
     role_profile = _match_role_profile(payload.get("job_role") or "")
     role_blueprint, blueprint_provider = await _infer_role_blueprint(payload)
+    if _adaptive_role_interview_enabled(payload):
+        return await _create_adaptive_interview_session(
+            payload,
+            question_count,
+            difficulty,
+            role_blueprint,
+            blueprint_provider,
+        )
     role_profile_summary = ""
     if role_profile:
         role_profile_summary = (
@@ -910,7 +1858,7 @@ Rules:
     try:
         blueprint, provider = await _generate_json_with_fallback(
             prompt,
-            ["groq", "gemini", "ollama"],
+            ["gemini", "ollama"],
             0.3,
         )
         provider_meta["generation_provider"] = provider
@@ -919,7 +1867,7 @@ Rules:
 
     assistant_intro = _normalize_text(blueprint.get("assistant_intro") or "")
     if not assistant_intro:
-        assistant_intro = "Hello. I am your AI interview assistant. Let us begin."
+        assistant_intro = "Hello. I’m your AI interview assistant. Let’s begin whenever you’re ready."
 
     questions: List[Dict[str, Any]] = []
     for idx, raw_question in enumerate(blueprint.get("questions") or []):
@@ -1007,6 +1955,14 @@ async def evaluate_interview_answer(
 
     question = questions[question_index]
     answer_text = _normalize_text(answer)
+    if session.get("meta", {}).get("adaptive_state", {}).get("enabled"):
+        return await _evaluate_adaptive_interview_answer(
+            session,
+            question_index,
+            question,
+            answer_text,
+        )
+
     context_summary = _context_summary(session["context"])
     expected_points = question.get("expected_points") or []
     evaluation_focus = question.get("evaluation_focus") or []
@@ -1052,12 +2008,14 @@ Rules:
     try:
         evaluation, provider_used = await _generate_json_with_fallback(
             prompt,
-            ["gemini", "groq", "ollama"],
+            ["gemini", "ollama"],
             0.2,
         )
     except ProviderError:
         evaluation = _heuristic_evaluation(question, answer_text)
         provider_used = "fallback"
+
+    session["providers"]["evaluation_provider"] = provider_used
 
     if provider_used != "fallback":
         heuristic_defaults = _heuristic_evaluation(question, answer_text)
@@ -1102,21 +2060,24 @@ Rules:
 
     is_complete = question_index >= len(questions) - 1
     next_question = None if is_complete else questions[question_index + 1]["question"]
+    next_question_type = None if is_complete else questions[question_index + 1].get("question_type", "practical")
 
     return {
         **result,
         "question_index": question_index,
         "is_complete": is_complete,
         "next_question": next_question,
+        "next_question_type": next_question_type,
         "progress": {
             "current": question_index + 1,
             "total": len(questions),
         },
+        "question_outline": session.get("question_outline", []),
     }
 
 
 def _fallback_summary(session: Dict[str, Any]) -> Dict[str, Any]:
-    evaluations = session.get("evaluations", [])
+    evaluations = _scored_evaluations(session)
     if evaluations:
         average_score = int(round(sum(item["score"] for item in evaluations) / len(evaluations)))
     else:
@@ -1159,13 +2120,18 @@ async def complete_interview_session(session_id: str, ended_early: bool = False)
     if not session:
         raise ProviderError("Interview session not found.")
 
-    evaluations = session.get("evaluations", [])
+    evaluations = _scored_evaluations(session)
     context_summary = _context_summary(session.get("context", {}))
+    adaptive_state = session.get("meta", {}).get("adaptive_state") or {}
+    adaptive_summary = ""
+    if adaptive_state.get("enabled"):
+        adaptive_summary = f"\nDiscovered candidate profile:\n{_adaptive_state_summary(adaptive_state)}\n"
     prompt = f"""
 You are summarizing an AI interview session.
 
 Interview context:
 {context_summary}
+{adaptive_summary}
 
 Per-question evaluations:
 {json.dumps(evaluations, ensure_ascii=False)}
@@ -1184,7 +2150,7 @@ Return valid JSON:
     try:
         summary, provider = await _generate_json_with_fallback(
             prompt,
-            ["gemini", "groq", "ollama"],
+            ["gemini", "ollama"],
             0.2,
         )
     except ProviderError:
@@ -1210,8 +2176,8 @@ Return valid JSON:
         **summary,
         "session_id": session_id,
         "ended_early": bool(ended_early),
-        "questions_answered": len(evaluations),
-        "total_questions": len(session.get("questions", [])),
+        "questions_answered": len(session.get("evaluations", [])),
+        "total_questions": _adaptive_total_questions(session) if adaptive_state.get("enabled") else len(session.get("questions", [])),
         "questions": [
             {
                 "question": item["question"],

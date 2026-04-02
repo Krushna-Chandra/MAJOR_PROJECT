@@ -4,6 +4,7 @@ import axios from "axios";
 import "../App.css";
 import {
   clean,
+  formatProviderName,
   normalizeEvaluation,
   normalizeReport,
   safeErrorText,
@@ -754,9 +755,9 @@ function VoiceInterviewPage() {
               <div style={{ background: "white", borderRadius: 24, padding: 22, boxShadow: "0 20px 50px rgba(88,107,176,0.12)" }}>
                 <h3 style={{ marginTop: 0, color: "#1f2a44" }}>Session providers</h3>
                 <div style={{ display: "grid", gap: 10, color: "#4f5873" }}>
-                  <div>Generation: {safeText(providers.generation_provider) || "Pending"}</div>
-                  <div>Evaluation: {safeText(providers.evaluation_provider) || "Pending"}</div>
-                  <div>Summary: {safeText(providers.summary_provider) || "Pending"}</div>
+                  <div>Generation: {formatProviderName(providers.generation_provider, "generation") || "Pending"}</div>
+                  <div>Evaluation: {formatProviderName(providers.evaluation_provider, "evaluation") || "Pending"}</div>
+                  <div>Summary: {formatProviderName(providers.summary_provider, "summary") || "Pending"}</div>
                   <div>Answers reviewed: {history.length}</div>
                   <div>Difficulty: {safeText(sessionMeta.difficulty || payload.experience) || "Adaptive"}</div>
                 </div>

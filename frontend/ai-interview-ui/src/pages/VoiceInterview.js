@@ -59,6 +59,65 @@ const safeScore = (value) => {
   return 0;
 };
 
+const formatProviderName = (provider, stage = "") => {
+  const value = safeText(provider).toLowerCase();
+  const phase = safeText(stage).toLowerCase();
+
+  if (!value) return "";
+  if (value === "gemini") return "Google Gemini";
+  if (value === "ollama") return "Ollama";
+
+  if (value === "fallback") {
+    if (phase === "generation") return "Built-in Question Generator";
+    if (phase === "evaluation") return "Built-in Answer Evaluator";
+    if (phase === "summary") return "Built-in Interview Summarizer";
+    return "Built-in Backup Engine";
+  }
+
+  return value.replace(/\b\w/g, (char) => char.toUpperCase());
+};
+
+const preferredVoiceHints = [
+  "google uk english female",
+  "microsoft aria",
+  "microsoft jenny",
+  "microsoft libby",
+  "microsoft sara",
+  "microsoft zira",
+  "samantha",
+  "ava",
+  "allison",
+  "female",
+];
+
+const pickGentleVoice = (voices = []) => {
+  if (!Array.isArray(voices) || !voices.length) return null;
+
+  const scored = voices
+    .filter((voice) => /en/i.test(`${voice.lang || ""} ${voice.name || ""}`))
+    .map((voice) => {
+      const name = safeText(voice.name).toLowerCase();
+      const lang = safeText(voice.lang).toLowerCase();
+      let score = 0;
+
+      if (lang.startsWith("en")) score += 40;
+      if (voice.localService) score += 10;
+      if (/female|woman|girl/.test(name)) score += 18;
+
+      preferredVoiceHints.forEach((hint, index) => {
+        if (name.includes(hint)) {
+          score += 30 - index;
+        }
+      });
+
+      if (/male|man|david|mark|guy|gordon/.test(name)) score -= 8;
+      return { voice, score };
+    })
+    .sort((left, right) => right.score - left.score);
+
+  return scored[0]?.voice || voices[0] || null;
+};
+
 const normalizeEvaluation = (item) => ({
   ...item,
   question: safeText(item?.question),
@@ -71,6 +130,7 @@ const normalizeEvaluation = (item) => ({
   suggested_answer: safeText(item?.suggested_answer),
   assistant_reply: safeText(item?.assistant_reply),
   score: safeScore(item?.score),
+  count_towards_score: item?.count_towards_score !== false,
 });
 
 function MetricTile({ label, value, tone = "#4338ca" }) {
@@ -160,6 +220,7 @@ function VoiceInterview() {
   const speakingRef = useRef(false);
   const endRequestedRef = useRef(false);
   const finalizingRef = useRef(false);
+  const preferredVoiceRef = useRef(null);
 
   const [sessionId, setSessionId] = useState("");
   const [providers, setProviders] = useState({});
@@ -222,6 +283,23 @@ function VoiceInterview() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
+  useEffect(() => {
+    if (!window.speechSynthesis) return undefined;
+
+    const refreshVoices = () => {
+      preferredVoiceRef.current = pickGentleVoice(window.speechSynthesis.getVoices());
+    };
+
+    refreshVoices();
+    window.speechSynthesis.onvoiceschanged = refreshVoices;
+
+    return () => {
+      if (window.speechSynthesis.onvoiceschanged === refreshVoices) {
+        window.speechSynthesis.onvoiceschanged = null;
+      }
+    };
+  }, []);
+
   const resolveTimerMinutes = () => {
     if (payload.config_mode === "time" && payload.time_mode_interval) {
       return Number(payload.time_mode_interval) || null;
@@ -234,7 +312,8 @@ function VoiceInterview() {
 
   const buildLocalFallbackSummary = (endedEarly = false) => {
     const evaluations = history.map((item) => normalizeEvaluation(item));
-    const scores = evaluations.map((item) => safeScore(item.score));
+    const scoredEvaluations = evaluations.filter((item) => item.count_towards_score !== false);
+    const scores = scoredEvaluations.map((item) => safeScore(item.score));
     const overallScore = scores.length
       ? Math.round(scores.reduce((sum, value) => sum + value, 0) / scores.length)
       : 0;
@@ -245,10 +324,10 @@ function VoiceInterview() {
       summary: evaluations.length
         ? "The interview was ended before the backend completion step finished, so this report was recovered from the answers already evaluated on this page."
         : "The interview ended before any evaluated answers were available for a full report.",
-      top_strengths: Array.from(new Set(evaluations.flatMap((item) => item.strengths || []))).slice(0, 4),
-      improvement_areas: Array.from(new Set(evaluations.flatMap((item) => item.gaps || []))).slice(0, 4),
-      strongest_questions: evaluations.filter((item) => item.score >= 75).map((item) => item.question).slice(0, 3),
-      needs_work_questions: evaluations.filter((item) => item.score < 60).map((item) => item.question).slice(0, 3),
+      top_strengths: Array.from(new Set(scoredEvaluations.flatMap((item) => item.strengths || []))).slice(0, 4),
+      improvement_areas: Array.from(new Set(scoredEvaluations.flatMap((item) => item.gaps || []))).slice(0, 4),
+      strongest_questions: scoredEvaluations.filter((item) => item.score >= 75).map((item) => item.question).slice(0, 3),
+      needs_work_questions: scoredEvaluations.filter((item) => item.score < 60).map((item) => item.question).slice(0, 3),
       evaluations,
       providers,
       user: (() => {
@@ -288,7 +367,16 @@ function VoiceInterview() {
       if (!value || !window.speechSynthesis) return resolve();
       stopSpeech();
       const utterance = new SpeechSynthesisUtterance(value);
-      utterance.lang = "en-US";
+      const voice = preferredVoiceRef.current || pickGentleVoice(window.speechSynthesis.getVoices());
+      if (voice) {
+        utterance.voice = voice;
+        utterance.lang = voice.lang || "en-US";
+      } else {
+        utterance.lang = "en-US";
+      }
+      utterance.rate = 0.94;
+      utterance.pitch = 1.02;
+      utterance.volume = 1;
       speakingRef.current = true;
       setAiSpeaking(true);
       utterance.onend = () => {
@@ -545,20 +633,27 @@ function VoiceInterview() {
         ...normalizeEvaluation(response.data),
         next_question: safeText(response.data?.next_question),
       };
+      const progressCurrent = Number(response.data?.progress?.current);
+      const progressTotal = Number(response.data?.progress?.total);
       setLatestEval(result);
       setHistory((prev) => [...prev, result]);
       setProviders((prev) => ({ ...prev, evaluation_provider: result.provider || prev.evaluation_provider }));
+      if (Number.isFinite(progressTotal) && progressTotal > 0) {
+        setTotal(progressTotal);
+      }
 
       if (endRequestedRef.current) {
         await finalizeEarlyExit();
         return;
       }
 
-        if (result.is_complete) {
-          await speak(result.assistant_reply || "Thank you. This interview is over.");
-          await finishInterview(sessionIdRef.current);
-        } else {
-        const nextIndex = indexRef.current + 1;
+      if (result.is_complete) {
+        await speak(result.assistant_reply || "Thank you. This interview is over.");
+        await finishInterview(sessionIdRef.current);
+      } else {
+        const nextIndex = Number.isFinite(progressCurrent) && progressCurrent >= 0
+          ? progressCurrent
+          : indexRef.current + 1;
         setIndex(nextIndex);
         setQuestion(result.next_question || "");
         setDraft("");
@@ -947,9 +1042,9 @@ function VoiceInterview() {
                 </div>
                 <h3 className="voice-ai-section-title">Interview HUD</h3>
                 <div className="voice-ai-hud-grid">
-                  <div className="voice-ai-hud-item"><span>Generation</span><strong>{safeText(providers.generation_provider) || "Pending"}</strong></div>
-                  <div className="voice-ai-hud-item"><span>Evaluation</span><strong>{safeText(providers.evaluation_provider) || "Pending"}</strong></div>
-                  <div className="voice-ai-hud-item"><span>Summary</span><strong>{safeText(providers.summary_provider) || "Pending"}</strong></div>
+                  <div className="voice-ai-hud-item"><span>Generation</span><strong>{formatProviderName(providers.generation_provider, "generation") || "Pending"}</strong></div>
+                  <div className="voice-ai-hud-item"><span>Evaluation</span><strong>{formatProviderName(providers.evaluation_provider, "evaluation") || "Pending"}</strong></div>
+                  <div className="voice-ai-hud-item"><span>Summary</span><strong>{formatProviderName(providers.summary_provider, "summary") || "Pending"}</strong></div>
                   <div className="voice-ai-hud-item"><span>Answers</span><strong>{history.length}</strong></div>
                   <div className="voice-ai-hud-item"><span>Listening</span><strong>{SpeechRecognition ? "Auto" : "Manual"}</strong></div>
                   <div className="voice-ai-hud-item"><span>Focus</span><strong>{safeText(payload.selected_options) || "General"}</strong></div>
@@ -997,7 +1092,11 @@ function VoiceInterview() {
                   <div className="voice-ai-eval-inline">
                     <div className="voice-ai-meta-row">
                       <h3 className="voice-ai-section-title" style={{ margin: 0 }}>Latest evaluation</h3>
-                      <strong>Score {safeScore(latestEval.score)}/100</strong>
+                      <strong>
+                        {latestEval.count_towards_score === false
+                          ? "Discovery step"
+                          : `Score ${safeScore(latestEval.score)}/100`}
+                      </strong>
                     </div>
                     <p className="voice-ai-copy" style={{ marginTop: 10 }}>{safeText(latestEval.feedback)}</p>
                     <div className="voice-ai-mini-list">
@@ -1039,7 +1138,7 @@ function VoiceInterview() {
                       <div>Practice type: {safeText(summary.context?.practice_type || payload.practice_type)}</div>
                       <div>Interview timer: {safeText(summary.context?.interview_mode_time) || "Off"}</div>
                       <div>Time mode interval: {safeText(summary.context?.time_mode_interval) || "Off"}</div>
-                      <div>AI providers: {safeText(summary.providers?.generation_provider)}, {safeText(summary.providers?.evaluation_provider)}, {safeText(summary.providers?.summary_provider)}</div>
+                      <div>AI providers: {formatProviderName(summary.providers?.generation_provider, "generation")}, {formatProviderName(summary.providers?.evaluation_provider, "evaluation")}, {formatProviderName(summary.providers?.summary_provider, "summary")}</div>
                     </div>
                   </div>
 

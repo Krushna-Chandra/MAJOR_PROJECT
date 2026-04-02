@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import "../App.css";
 import {
+  formatProviderName,
   normalizeReport,
   safeErrorText,
   safeScore,
@@ -41,7 +42,7 @@ function deriveSkillSignals(report) {
     { label: "Time Mgmt", keywords: ["time", "deadline", "prioritize", "delivery", "planning", "schedule"] },
   ];
 
-  const evaluations = report?.evaluations || [];
+  const evaluations = (report?.evaluations || []).filter((item) => item?.count_towards_score !== false);
   const reportText = safeText([
     report?.summary,
     ...(report?.top_strengths || []),
@@ -191,6 +192,7 @@ function Reports() {
   const [report, setReport] = useState(locationReport);
   const [loading, setLoading] = useState(!locationReport);
   const [error, setError] = useState("");
+  const [providerStatus, setProviderStatus] = useState(null);
 
   useEffect(() => {
     if (locationReport || !sessionId) return;
@@ -221,8 +223,31 @@ function Reports() {
     loadReport();
   }, [location.state?.context, locationReport, sessionId]);
 
+  useEffect(() => {
+    let ignore = false;
+
+    const loadProviderStatus = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/ai-interview/providers/status`);
+        if (!ignore) {
+          setProviderStatus(response.data || null);
+        }
+      } catch {
+        if (!ignore) {
+          setProviderStatus(null);
+        }
+      }
+    };
+
+    loadProviderStatus();
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
   const reportView = useMemo(() => {
-    const evaluations = report?.evaluations || [];
+    const evaluations = (report?.evaluations || []).filter((item) => item?.count_towards_score !== false);
     const answeredCount = evaluations.length;
     const strongAnswerCount = evaluations.filter((item) => item.score >= 75).length;
     const needsWorkCount = evaluations.filter((item) => item.score < 60).length;
@@ -283,6 +308,26 @@ function Reports() {
     needsWorkCount,
     timer,
   } = reportView;
+  const providerReadiness = useMemo(() => {
+    if (!providerStatus?.providers || typeof providerStatus.providers !== "object") return [];
+
+    return Object.entries(providerStatus.providers).map(([name, details]) => {
+      const label = safeText(name).replace(/\b\w/g, (char) => char.toUpperCase());
+      const configured = Boolean(details?.configured);
+      const available = Boolean(details?.available);
+      const connectionChecked = Boolean(details?.connection_checked);
+      const model = safeText(details?.model);
+      const detail = safeText(details?.detail);
+      const status = connectionChecked
+        ? available ? "Reachable" : configured ? "Needs attention" : "Not configured"
+        : configured ? "Configured" : "Not configured";
+
+      return {
+        label,
+        description: [status, model ? `model ${model}` : "", detail].filter(Boolean).join(" • "),
+      };
+    });
+  }, [providerStatus]);
 
   const downloadReportPdf = () => {
     if (!reportRef.current) {
@@ -600,9 +645,10 @@ function Reports() {
                   </div>
                 </div>
                 <div className="report-bullet-list">
-                  <div>- Generation: {safeText(report.providers?.generation_provider) || "Pending"}</div>
-                  <div>- Evaluation: {safeText(report.providers?.evaluation_provider) || "Pending"}</div>
-                  <div>- Summary: {safeText(report.providers?.summary_provider) || "Pending"}</div>
+                  <div>- Generation: {formatProviderName(report.providers?.generation_provider, "generation") || "Pending"}</div>
+                  <div>- Evaluation: {formatProviderName(report.providers?.evaluation_provider, "evaluation") || "Pending"}</div>
+                  <div>- Summary: {formatProviderName(report.providers?.summary_provider, "summary") || "Pending"}</div>
+                  {providerReadiness.map((item) => <div key={item.label}>- {item.label}: {item.description}</div>)}
                   <div>- Mode: {safeText(report.context?.selected_mode) || "Interview"}</div>
                   <div>- Timer: {timer}</div>
                   <div>- Practice type: {safeText(report.context?.practice_type) || "practice"}</div>

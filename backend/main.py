@@ -27,6 +27,7 @@ from interview_ai import (
     complete_interview_session,
     create_interview_session,
     evaluate_interview_answer,
+    get_ai_provider_status,
     get_session_payload,
 )
 
@@ -340,6 +341,14 @@ async def start_ai_interview(
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to start interview: {exc}")
+
+
+@app.get("/ai-interview/providers/status")
+async def ai_provider_status():
+    try:
+        return get_ai_provider_status()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to inspect AI providers: {exc}")
 
 
 @app.post("/ai-interview/evaluate")

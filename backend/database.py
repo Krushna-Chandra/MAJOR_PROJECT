@@ -1,9 +1,10 @@
 import os
 from motor.motor_asyncio import AsyncIOMotorClient
-from dotenv import load_dotenv
+
+from config import load_backend_env
 
 # ---------------- LOAD ENV ----------------
-load_dotenv()
+load_backend_env()
 
 # ---------------- READ MONGO URL ----------------
 MONGO_URL = os.getenv("MONGO_URL")

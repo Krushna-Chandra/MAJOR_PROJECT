@@ -58,6 +58,26 @@ export const safeScore = (value) => {
   return 0;
 };
 
+export const formatProviderName = (provider, stage = "") => {
+  const value = safeText(provider).toLowerCase();
+  const phase = safeText(stage).toLowerCase();
+
+  if (!value) return "";
+
+  if (value === "gemini") return "Google Gemini";
+  if (value === "ollama") return "Ollama";
+
+  if (value === "fallback") {
+    if (phase === "generation") return "Built-in Question Generator";
+    if (phase === "evaluation") return "Built-in Answer Evaluator";
+    if (phase === "summary") return "Built-in Interview Summarizer";
+    if (phase === "analysis") return "Built-in Role Analyzer";
+    return "Built-in Backup Engine";
+  }
+
+  return value.replace(/\b\w/g, (char) => char.toUpperCase());
+};
+
 export const normalizeEvaluation = (item) => ({
   question_id: safeText(item?.question_id),
   question: safeText(item?.question),
@@ -72,6 +92,7 @@ export const normalizeEvaluation = (item) => ({
   assistant_reply: safeText(item?.assistant_reply),
   score: safeScore(item?.score),
   provider: safeText(item?.provider),
+  count_towards_score: item?.count_towards_score !== false,
 });
 
 export const normalizeQuestionOutline = (questions) => {
@@ -103,6 +124,11 @@ export const normalizeReport = (report, fallbackContext = {}, fallbackUser = nul
   const storedUser = fallbackUser || getStoredUser();
   const context = report?.context && typeof report.context === "object" ? report.context : fallbackContext || {};
   const user = report?.user && typeof report.user === "object" ? report.user : storedUser;
+  const evaluations = Array.isArray(report?.evaluations) ? report.evaluations.map((item) => normalizeEvaluation(item)) : [];
+  const providerFromEvaluations = evaluations
+    .map((item) => safeText(item?.provider))
+    .find((value) => value && value !== "fallback");
+  const evaluationProvider = safeText(report?.providers?.evaluation_provider);
 
   return {
     session_id: safeText(report?.session_id),
@@ -116,11 +142,13 @@ export const normalizeReport = (report, fallbackContext = {}, fallbackUser = nul
     strongest_questions: safeTextList(report?.strongest_questions),
     needs_work_questions: safeTextList(report?.needs_work_questions),
     answers: safeTextList(report?.answers),
-    evaluations: Array.isArray(report?.evaluations) ? report.evaluations.map((item) => normalizeEvaluation(item)) : [],
+    evaluations,
     question_outline: normalizeQuestionOutline(report?.question_outline || report?.questions),
     providers: {
       generation_provider: safeText(report?.providers?.generation_provider),
-      evaluation_provider: safeText(report?.providers?.evaluation_provider),
+      evaluation_provider: evaluationProvider && evaluationProvider !== "fallback"
+        ? evaluationProvider
+        : providerFromEvaluations || evaluationProvider,
       summary_provider: safeText(report?.providers?.summary_provider),
     },
     context: {
