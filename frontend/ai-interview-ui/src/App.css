@@ -13938,3 +13938,28 @@ button {
     text-align: center;
   }
 }
+
+/* ===== PRACTICE PAGE NAVBAR SPACING FIX ===== */
+@media (max-width: 1200px) {
+  .mock-page .mock-hero {
+    padding-top: 128px;
+  }
+}
+
+@media (max-width: 900px) {
+  .mock-page .mock-hero {
+    padding-top: 108px;
+  }
+}
+
+@media (max-width: 600px) {
+  .mock-page .mock-hero {
+    padding-top: 92px;
+  }
+}
+
+@media (max-width: 420px) {
+  .mock-page .mock-hero {
+    padding-top: 84px;
+  }
+}
