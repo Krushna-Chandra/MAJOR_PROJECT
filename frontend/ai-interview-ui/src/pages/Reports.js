@@ -165,16 +165,51 @@ function MetricTile({ label, value, tone = "indigo" }) {
   );
 }
 
+function formatBreakdownLabel(key) {
+  const labels = {
+    communication: "Communication",
+    confidence: "Confidence",
+    problem_solving: "Problem-solving",
+    teamwork: "Teamwork",
+    leadership: "Leadership",
+    hr_readiness: "HR Readiness",
+    personality_attitude: "Personality",
+    cultural_fit: "Cultural Fit",
+    star_structure: "STAR",
+  };
+
+  return labels[key] || safeText(key).replace(/_/g, " ");
+}
+
+function formatRoundLabel(value) {
+  const normalized = safeText(value);
+  if (!normalized) return "";
+  return normalized
+    .replace(/_/g, " / ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
 function buildRetryState(report) {
   if (!report) return null;
 
+  const category = safeText(report.context?.category) || "technical";
+  const isHrCategory = category.toLowerCase() === "hr";
+  const selectedOptions = isHrCategory
+    ? (safeTextList(report.context?.focus_areas || report.context?.selected_options).length
+        ? safeTextList(report.context?.focus_areas || report.context?.selected_options)
+        : ["Communication", "Leadership", "Problem-solving", "Teamwork", "Confidence"])
+    : [safeText(report.context?.primary_language || report.context?.job_role || report.context?.category || "General")];
+
   return {
-    category: safeText(report.context?.category) || "technical",
-    selectedMode: report.context?.primary_language ? "language" : "role",
-    selectedOptions: [safeText(report.context?.primary_language || report.context?.job_role || report.context?.category || "General")],
+    category,
+    selectedMode: isHrCategory ? "hr" : report.context?.primary_language ? "language" : "role",
+    selectedOptions,
+    focusAreas: isHrCategory ? selectedOptions : [],
+    hrRound: isHrCategory ? safeText(report.context?.hr_round) : "",
+    jobRole: safeText(report.context?.job_role),
     experience: safeText(report.context?.experience) || "Fresher",
     configMode: "question",
-    questionCount: 5,
+    questionCount: 10,
     customQuestionCount: null,
     practiceType: safeText(report.context?.practice_type) === "interview" ? "interview" : "practice",
     interviewModeTime: report.context?.interview_mode_time ? Number(report.context.interview_mode_time) || 10 : 10,
@@ -261,9 +296,22 @@ function Reports() {
       report?.context?.job_role || report?.context?.primary_language || report?.context?.category || "Interview"
     );
     const roleMode = safeText(report?.context?.selected_mode || report?.context?.category || "Interview");
+    const roundLabel = formatRoundLabel(report?.context?.hr_round || roleMode || "Interview");
     const experience = safeText(report?.context?.experience || "Not specified");
     const timer = safeText(report?.context?.interview_mode_time || report?.context?.time_mode_interval || "No timer");
+    const focusAreaLabel = safeText(report?.context?.focus_areas || report?.context?.selected_options) || "core";
     const skillSignals = deriveSkillSignals(report);
+    const isHrReport = safeText(report?.context?.category).toLowerCase() === "hr";
+    const scoreBreakdown = report?.score_breakdown && typeof report.score_breakdown === "object"
+      ? Object.entries(report.score_breakdown)
+          .filter(([, value]) => value != null)
+          .map(([key, value], index) => ({
+            key,
+            label: formatBreakdownLabel(key),
+            value: safeScore(value),
+            tone: ["teal", "green", "blue", "orange", "indigo"][index % 5],
+          }))
+      : [];
     const retryState = buildRetryState(report);
     const completedLabel = new Date().toLocaleDateString("en-GB");
 
@@ -281,11 +329,15 @@ function Reports() {
       answeredCount,
       completedLabel,
       experience,
+      focusAreaLabel,
+      isHrReport,
       performanceRatio,
       questionCards,
+      roundLabel,
       reportTitle,
       retryState,
       roleMode,
+      scoreBreakdown,
       skillSignals,
       strongAnswerCount,
       needsWorkCount,
@@ -298,11 +350,15 @@ function Reports() {
     answeredCount,
     completedLabel,
     experience,
+    focusAreaLabel,
+    isHrReport,
     performanceRatio,
     questionCards,
+    roundLabel,
     reportTitle,
     retryState,
     roleMode,
+    scoreBreakdown,
     skillSignals,
     strongAnswerCount,
     needsWorkCount,
@@ -395,6 +451,7 @@ function Reports() {
                 <div className="report-tag-row">
                   <span className="report-chip">{roleMode}</span>
                   <span className="report-chip">{reportTitle}</span>
+                  {isHrReport ? <span className="report-chip">{roundLabel}</span> : null}
                   <span className="report-chip">{experience} difficulty</span>
                   <span className="report-chip">{timer}</span>
                 </div>
@@ -433,6 +490,23 @@ function Reports() {
                   <MetricTile label="Need work" value={needsWorkCount} tone="orange" />
                   <MetricTile label="Coverage ratio" value={`${performanceRatio}%`} tone="blue" />
                 </div>
+
+                {isHrReport && scoreBreakdown.length ? (
+                  <div className="report-score-card">
+                    <div className="report-card-header report-card-header-tight">
+                      <div>
+                        <span className="report-card-eyebrow">HR score breakdown</span>
+                        <h3>Communication and readiness</h3>
+                      </div>
+                      <Target size={18} />
+                    </div>
+                    <div className="report-metrics-grid">
+                      {scoreBreakdown.map((item) => (
+                        <MetricTile key={item.key} label={item.label} value={`${item.value}/100`} tone={item.tone} />
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="report-score-card">
                   <div className="report-card-header report-card-header-tight">
@@ -598,7 +672,7 @@ function Reports() {
                   </div>
                   <div className="report-snapshot-tile">
                     <span><Target size={14} /> Focus area</span>
-                    <strong>{safeText(report.context?.selected_options) || "core"}</strong>
+                    <strong>{focusAreaLabel}</strong>
                   </div>
                   <div className="report-snapshot-tile">
                     <span><CalendarDays size={14} /> Completed</span>

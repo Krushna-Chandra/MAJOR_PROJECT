@@ -173,7 +173,7 @@ function buildInstructionState(nextInterview, report) {
     selectedOptions: [nextInterview.option],
     experience: inferExperience(report),
     configMode: "question",
-    questionCount: 5,
+    questionCount: 10,
     customQuestionCount: null,
     practiceType: nextInterview.practiceType,
     interviewModeTime: nextInterview.practiceType === "interview" ? 10 : null,

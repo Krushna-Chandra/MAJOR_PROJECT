@@ -38,7 +38,7 @@ function MockInterview() {
   const [selectedOptions, setSelectedOptions] = useState([]);
   const [experience, setExperience] = useState("");
   const [configMode, setConfigMode] = useState(null);
-  const [questionCount, setQuestionCount] = useState(5);
+  const [questionCount, setQuestionCount] = useState(10);
   const [customQuestionCount, setCustomQuestionCount] = useState("");
   const [practiceType, setPracticeType] = useState("practice");
   const [interviewTime, setInterviewTime] = useState(5);
@@ -58,7 +58,7 @@ function MockInterview() {
     setSearchTerm("");
     setExperience("");
     setConfigMode(null);
-    setQuestionCount(5);
+    setQuestionCount(10);
     setCustomQuestionCount("");
     setPracticeType("practice");
     setInterviewTime(5);
@@ -67,14 +67,30 @@ function MockInterview() {
     setIsLocked(false);
   };
 
+  const questionModeValid =
+    configMode !== "question" ||
+    (questionCount === "custom"
+      ? Number(customQuestionCount) >= 10 && Number(customQuestionCount) <= 30
+      : Number(questionCount) >= 10 && Number(questionCount) <= 30);
+
+  const timeModeValid = configMode !== "time" || Number(timeModeValue) > 0;
+  const interviewTimerValid = practiceType !== "interview" || Number(interviewTime) > 0;
+  const isSetupReady =
+    selectedOptions.length > 0 &&
+    Boolean(experience) &&
+    Boolean(configMode) &&
+    questionModeValid &&
+    timeModeValid &&
+    interviewTimerValid;
+
   const handleConfirm = () => {
-    if (!selectedOptions.length || !experience) return;
+    if (!isSetupReady) return;
     const resolvedQuestionCount = questionCount === 'custom' ? Number(customQuestionCount || 0) : Number(questionCount);
     setConfirmedSelection({
       role: selectedOptions[0],
       experience,
       configMode,
-      questionCount: configMode === 'question' ? (resolvedQuestionCount || 5) : null,
+      questionCount: configMode === 'question' ? (resolvedQuestionCount || 10) : null,
       customQuestionCount: configMode === 'question' && questionCount === 'custom' ? customQuestionCount : null,
       practiceType,
       interviewModeTime: practiceType === 'interview' ? interviewTime : null,
@@ -404,22 +420,23 @@ function MockInterview() {
                     background: isLocked ? '#f1f5f9' : '#fff'
                   }}
                 >
-                  <option value={5}>5</option>
-                  <option value={3}>3</option>
                   <option value={10}>10</option>
                   <option value={15}>15</option>
                   <option value={20}>20</option>
+                  <option value={25}>25</option>
+                  <option value={30}>30</option>
                   <option value="custom">Custom</option>
                 </select>
 
                 {questionCount === 'custom' && (
                   <input
                     type="number"
-                    min={1}
+                    min={10}
+                    max={30}
                     value={customQuestionCount}
                     onChange={(e) => setCustomQuestionCount(e.target.value)}
                     disabled={isLocked}
-                    placeholder="Enter custom count"
+                    placeholder="Enter 10 to 30 questions"
                     style={{
                       marginTop: 8,
                       width: '100%',
@@ -429,6 +446,12 @@ function MockInterview() {
                       border: '1px solid #cbd5e1'
                     }}
                   />
+                )}
+
+                {questionCount === 'custom' && customQuestionCount && !questionModeValid && (
+                  <div style={{ marginTop: 8, color: '#b91c1c', fontSize: 13 }}>
+                    Enter a custom question count between 10 and 30.
+                  </div>
                 )}
               </div>
             )}
@@ -459,7 +482,7 @@ function MockInterview() {
                   ))}
                 </select>
                 <small style={{ color: '#475569' }}>
-                  AI will ask questions for this time interval.
+                  AI will ask as many questions as possible within this selected time limit.
                 </small>
               </div>
             )}
@@ -533,10 +556,10 @@ function MockInterview() {
               className="topic-action-btn"
               style={{
                 marginTop: 14,
-                opacity: selectedOptions.length > 0 && experience ? 1 : 0.5,
-                cursor: selectedOptions.length > 0 && experience ? 'pointer' : 'not-allowed'
+                opacity: isSetupReady ? 1 : 0.5,
+                cursor: isSetupReady ? 'pointer' : 'not-allowed'
               }}
-              disabled={!(selectedOptions.length > 0 && experience)}
+              disabled={!isSetupReady}
               onClick={handleConfirm}
             >
               Confirm Setup

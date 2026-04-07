@@ -5940,6 +5940,36 @@ button {
 }
 
 /* Reveal on scroll */
+.route-transition-shell {
+  width: 100%;
+  overflow-x: hidden;
+  overflow-y: clip;
+}
+
+.route-transition {
+  width: 100%;
+  min-height: 100%;
+  transform-origin: center top;
+  backface-visibility: hidden;
+  will-change: opacity, transform, filter;
+}
+
+.route-transition--enter {
+  animation: routeLayerIn 0.58s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.route-transition--exit {
+  animation: routeLayerOut 0.28s cubic-bezier(0.4, 0, 1, 1) both;
+  pointer-events: none;
+}
+
+.route-transition--home {
+  animation: none;
+  opacity: 1;
+  filter: none;
+  transform: none;
+}
+
 .reveal {
   opacity: 0;
   transform: translateY(24px);
@@ -5950,6 +5980,49 @@ button {
 .reveal.visible {
   opacity: 1;
   transform: translateY(0);
+}
+
+/* Keep full-page route shells from briefly overflowing the viewport during reveal. */
+.mock-page.reveal,
+.page-content.reveal,
+.resume-studio-page.reveal,
+.resume-report-page.reveal,
+.report-page-shell.reveal {
+  opacity: 1;
+  transform: none;
+}
+
+@keyframes routeLayerIn {
+  from {
+    opacity: 0;
+    filter: blur(12px);
+    transform: translate3d(0, 18px, 0) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes routeLayerOut {
+  from {
+    opacity: 1;
+    filter: blur(0);
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    opacity: 0;
+    filter: blur(8px);
+    transform: translate3d(0, -10px, 0) scale(1.01);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-transition--enter,
+  .route-transition--exit {
+    animation: none;
+  }
 }
 
 .section-title {

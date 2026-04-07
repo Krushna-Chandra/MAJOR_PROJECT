@@ -58,6 +58,14 @@ export const safeScore = (value) => {
   return 0;
 };
 
+export const safeOptionalScore = (value) => {
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) {
+    return Math.max(0, Math.min(100, Math.round(numeric)));
+  }
+  return null;
+};
+
 export const formatProviderName = (provider, stage = "") => {
   const value = safeText(provider).toLowerCase();
   const phase = safeText(stage).toLowerCase();
@@ -78,10 +86,40 @@ export const formatProviderName = (provider, stage = "") => {
   return value.replace(/\b\w/g, (char) => char.toUpperCase());
 };
 
+const normalizeScoreBreakdown = (value) => {
+  if (!value || typeof value !== "object") return null;
+
+  const keys = [
+    "communication",
+    "confidence",
+    "problem_solving",
+    "teamwork",
+    "leadership",
+    "hr_readiness",
+    "personality_attitude",
+    "cultural_fit",
+    "star_structure",
+  ];
+
+  const normalized = {};
+  let hasAny = false;
+
+  keys.forEach((key) => {
+    const score = safeOptionalScore(value?.[key]);
+    if (score != null) {
+      normalized[key] = score;
+      hasAny = true;
+    }
+  });
+
+  return hasAny ? normalized : null;
+};
+
 export const normalizeEvaluation = (item) => ({
   question_id: safeText(item?.question_id),
   question: safeText(item?.question),
   question_type: safeText(item?.question_type) || "practical",
+  interview_phase: safeText(item?.interview_phase),
   answer: safeText(item?.answer),
   feedback: safeText(item?.feedback),
   strengths: safeTextList(item?.strengths),
@@ -100,6 +138,17 @@ export const normalizeEvaluation = (item) => ({
   score: safeScore(item?.score),
   provider: safeText(item?.provider),
   count_towards_score: item?.count_towards_score !== false,
+  communication_score: safeOptionalScore(item?.communication_score),
+  confidence_score: safeOptionalScore(item?.confidence_score),
+  problem_solving_score: safeOptionalScore(item?.problem_solving_score),
+  teamwork_score: safeOptionalScore(item?.teamwork_score),
+  leadership_score: safeOptionalScore(item?.leadership_score),
+  hr_readiness_score: safeOptionalScore(item?.hr_readiness_score),
+  personality_attitude_score: safeOptionalScore(item?.personality_attitude_score),
+  cultural_fit_score: safeOptionalScore(item?.cultural_fit_score),
+  star_score: safeOptionalScore(item?.star_score),
+  is_control_turn: Boolean(item?.is_control_turn),
+  control_command: safeText(item?.control_command),
 });
 
 export const normalizeQuestionOutline = (questions) => {
@@ -148,6 +197,7 @@ export const normalizeReport = (report, fallbackContext = {}, fallbackUser = nul
     improvement_areas: safeTextList(report?.improvement_areas),
     strongest_questions: safeTextList(report?.strongest_questions),
     needs_work_questions: safeTextList(report?.needs_work_questions),
+    score_breakdown: normalizeScoreBreakdown(report?.score_breakdown),
     answers: safeTextList(report?.answers),
     evaluations,
     question_outline: normalizeQuestionOutline(report?.question_outline || report?.questions),
@@ -169,6 +219,8 @@ export const normalizeReport = (report, fallbackContext = {}, fallbackUser = nul
       interview_mode_time: safeText(context?.interview_mode_time),
       time_mode_interval: safeText(context?.time_mode_interval),
       selected_options: safeTextList(context?.selected_options),
+      focus_areas: safeTextList(context?.focus_areas || context?.selected_options),
+      hr_round: safeText(context?.hr_round),
     },
     user: user
       ? {

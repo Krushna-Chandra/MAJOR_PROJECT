@@ -1922,6 +1922,7 @@ async def complete_ai_interview(
                         "improvement_areas": summary.get("improvement_areas", []),
                         "strongest_questions": summary.get("strongest_questions", []),
                         "needs_work_questions": summary.get("needs_work_questions", []),
+                        "score_breakdown": summary.get("score_breakdown"),
                         "providers": summary.get("providers"),
                         "answers": session.get("answers", []),
                         "evaluations": session.get("evaluations", []),

@@ -288,8 +288,8 @@ def _clamp_question_count(value: Any) -> int:
     try:
         count = int(value)
     except (TypeError, ValueError):
-        count = 5
-    return max(3, min(count, 10))
+        count = 10
+    return max(10, min(count, 30))
 
 
 def _safe_list(values: Any) -> List[str]:
@@ -313,12 +313,14 @@ def _safe_list(values: Any) -> List[str]:
 
 
 def _context_summary(payload: Dict[str, Any]) -> str:
-    selected_options = payload.get("selected_options") or []
-    primary_focus = ", ".join(selected_options) if selected_options else "general interview preparation"
+    selected_options = _safe_list(payload.get("selected_options") or [])
+    focus_areas = _safe_list(payload.get("focus_areas") or []) or selected_options
+    primary_focus = ", ".join(focus_areas) if focus_areas else "general interview preparation"
     config_mode = payload.get("config_mode") or "question"
     time_mode_interval = payload.get("time_mode_interval")
     interview_mode_time = payload.get("interview_mode_time")
     role_profile = _match_role_profile(payload.get("job_role") or "")
+    hr_round = _normalize_text(payload.get("hr_round") or "")
     selected_mode = payload.get("selected_mode") or (
         "language" if payload.get("primary_language") else "role" if payload.get("job_role") else "general"
     )
@@ -333,6 +335,8 @@ def _context_summary(payload: Dict[str, Any]) -> str:
         f"Practice type: {payload.get('practice_type') or 'interview'}",
         f"Question count: {_clamp_question_count(payload.get('question_count'))}",
     ]
+    if hr_round:
+        parts.append(f"HR round: {hr_round}")
     if config_mode == "time" and time_mode_interval:
         parts.append(f"Time mode interval: {time_mode_interval} minutes")
     if payload.get("practice_type") == "interview" and interview_mode_time:
@@ -365,9 +369,22 @@ def _resolve_question_count(payload: Dict[str, Any]) -> int:
             minutes = int(interval)
         except (TypeError, ValueError):
             minutes = 5
-        derived_count = max(3, min(10, round(minutes / 2)))
+        derived_count = max(10, min(30, minutes * 3))
         return derived_count
     return _clamp_question_count(payload.get("question_count"))
+
+
+def _selected_focus_areas(payload: Dict[str, Any]) -> List[str]:
+    return _safe_list(payload.get("focus_areas") or []) or _safe_list(payload.get("selected_options") or [])
+
+
+def _hr_round_mode(payload: Dict[str, Any]) -> str:
+    value = _normalize_text(payload.get("hr_round") or "").lower()
+    return value if value in {"technical", "hr_behavioral", "both"} else "hr_behavioral"
+
+
+def _hr_adaptive_interview_enabled(payload: Dict[str, Any]) -> bool:
+    return _normalize_text(payload.get("category") or "").lower() == "hr"
 
 
 def _target_subject(payload: Dict[str, Any]) -> str:
@@ -978,6 +995,72 @@ def _default_questions(payload: Dict[str, Any], variation: Optional[Dict[str, st
             },
         ]
 
+    supplemental_topics = _merge_unique([], _safe_list(focus))
+    if role_profile:
+        supplemental_topics = _merge_unique(supplemental_topics, role_profile.get("core_fields") or [])
+    supplemental_topics = _merge_unique(supplemental_topics, [target_subject, language or "", role or ""])
+    if not supplemental_topics:
+        supplemental_topics = [target_subject or "core fundamentals"]
+
+    while len(base_questions) < question_count:
+        topic = supplemental_topics[(len(base_questions) - 1) % len(supplemental_topics)]
+        rotation = len(base_questions) % 4
+        if rotation == 0:
+            base_questions.append(
+                {
+                    "question": f"For {topic}, what fundamentals, best practices, or common mistakes should a strong {experience} candidate know well?",
+                    "question_type": "fundamental",
+                    "expected_points": [
+                        "clear fundamentals",
+                        "best practices",
+                        "common mistakes or pitfalls",
+                        "practical relevance",
+                    ],
+                    "evaluation_focus": ["fundamentals", "clarity", "relevance"],
+                }
+            )
+        elif rotation == 1:
+            base_questions.append(
+                {
+                    "question": f"Describe a practical example where you would apply {topic} in a real project or interview scenario.",
+                    "question_type": "practical",
+                    "expected_points": [
+                        "clear use case",
+                        "specific implementation or workflow",
+                        "relevant trade-offs",
+                        "result or value",
+                    ],
+                    "evaluation_focus": ["application", "specificity", "clarity"],
+                }
+            )
+        elif rotation == 2:
+            base_questions.append(
+                {
+                    "question": f"What trade-offs, edge cases, or debugging issues do you watch for when working with {topic}?",
+                    "question_type": "scenario",
+                    "expected_points": [
+                        "important trade-offs",
+                        "edge cases or failure modes",
+                        "debugging or mitigation steps",
+                        "practical judgment",
+                    ],
+                    "evaluation_focus": ["problem solving", "real-world awareness", "clarity"],
+                }
+            )
+        else:
+            base_questions.append(
+                {
+                    "question": f"How would you explain {topic} clearly to an interviewer while proving you have hands-on understanding?",
+                    "question_type": "conceptual",
+                    "expected_points": [
+                        "clear explanation",
+                        "hands-on experience reference",
+                        "structured communication",
+                    ],
+                    "evaluation_focus": ["conceptual clarity", "examples", "confidence"],
+                }
+            )
+
     first_block = base_questions[:1]
     remaining = base_questions[1:]
     shuffler.shuffle(remaining)
@@ -1071,7 +1154,46 @@ def _normalize_evaluation_payload(evaluation: Dict[str, Any], fallback_defaults:
         ),
         "suggestions": suggestions,
     }
+    for key in [
+        "communication_score",
+        "confidence_score",
+        "problem_solving_score",
+    ]:
+        normalized[key] = _normalize_score_value(
+            evaluation.get(key),
+            fallback_defaults.get(key),
+        )
     normalized["score"] = max(0, min(100, normalized["score"]))
+    return normalized
+
+
+def _normalize_score_value(value: Any, fallback: Optional[int] = None) -> Optional[int]:
+    try:
+        score = int(float(value))
+    except (TypeError, ValueError):
+        score = fallback
+    if score is None:
+        return None
+    return max(0, min(100, score))
+
+
+def _normalize_hr_evaluation_payload(evaluation: Dict[str, Any], fallback_defaults: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = _normalize_evaluation_payload(evaluation, fallback_defaults)
+    for key in [
+        "communication_score",
+        "confidence_score",
+        "problem_solving_score",
+        "teamwork_score",
+        "leadership_score",
+        "hr_readiness_score",
+        "personality_attitude_score",
+        "cultural_fit_score",
+        "star_score",
+    ]:
+        normalized[key] = _normalize_score_value(
+            evaluation.get(key),
+            fallback_defaults.get(key),
+        )
     return normalized
 
 
@@ -1118,8 +1240,29 @@ def _heuristic_evaluation(question: Dict[str, Any], answer: str) -> Dict[str, An
 
     word_count = len(answer_text.split())
     project_markers = ("example", "project", "production", "real", "client", "api", "service", "system", "deployed")
+    structure_markers = ("first", "second", "then", "finally", "approach", "step", "start by", "walk through")
+    complexity_markers = ("time complexity", "space complexity", "big o", "o(", "complexity")
+    tradeoff_markers = ("trade-off", "tradeoff", "optimiz", "latency", "throughput", "scal", "memory")
+    uncertainty_markers = ("maybe", "i think", "probably", "not sure", "guess", "kind of")
     has_real_world_marker = any(marker in answer_lower for marker in project_markers)
+    has_structure = any(marker in answer_lower for marker in structure_markers)
+    has_complexity = any(marker in answer_lower for marker in complexity_markers)
+    has_tradeoff = any(marker in answer_lower for marker in tradeoff_markers)
+    uncertainty_hits = sum(1 for marker in uncertainty_markers if marker in answer_lower)
     off_topic = bool(answer_text) and coverage < 0.12 and not matched_points
+
+    communication_score = max(
+        30,
+        min(100, score + (8 if word_count >= 30 else -8 if word_count < 12 else 0) + (6 if has_structure else -3)),
+    )
+    confidence_score = max(
+        25,
+        min(100, score + (6 if word_count >= 22 else -6 if word_count < 10 else 0) - min(12, uncertainty_hits * 4)),
+    )
+    problem_solving_score = max(
+        30,
+        min(100, score + (10 if has_structure else -4) + (6 if has_complexity or has_tradeoff else 0)),
+    )
 
     relevance = "Not Relevant" if off_topic else ("Partially Relevant" if coverage < 0.45 else "Relevant")
     correctness = "Incorrect" if coverage < 0.18 else ("Partially Correct" if coverage < 0.65 else "Correct")
@@ -1189,7 +1332,76 @@ def _heuristic_evaluation(question: Dict[str, Any], answer: str) -> Dict[str, An
         "logical_validity": logical_validity,
         "real_world_applicability": real_world_applicability,
         "suggestions": suggestions,
+        "communication_score": communication_score,
+        "confidence_score": confidence_score,
+        "problem_solving_score": problem_solving_score,
     }
+
+
+def _hr_heuristic_evaluation(question: Dict[str, Any], answer: str) -> Dict[str, Any]:
+    base = _heuristic_evaluation(question, answer)
+    answer_text = _normalize_text(answer)
+    answer_lower = answer_text.lower()
+    word_count = len(answer_text.split())
+
+    teamwork_markers = ("team", "collabor", "together", "support", "stakeholder")
+    leadership_markers = ("lead", "owned", "initiative", "mentor", "guided", "responsible")
+    problem_markers = ("problem", "challenge", "resolved", "solution", "decided", "trade-off", "deadline")
+    result_markers = ("result", "outcome", "impact", "learned", "improved", "delivered", "achieved")
+    star_markers = ("situation", "task", "action", "result")
+
+    has_teamwork = any(marker in answer_lower for marker in teamwork_markers)
+    has_leadership = any(marker in answer_lower for marker in leadership_markers)
+    has_problem = any(marker in answer_lower for marker in problem_markers)
+    has_result = any(marker in answer_lower for marker in result_markers)
+    star_hits = sum(1 for marker in star_markers if marker in answer_lower)
+
+    communication_score = max(35, min(100, base["score"] + (8 if word_count >= 35 else -6 if word_count < 14 else 0)))
+    confidence_score = max(30, min(100, base["score"] + (6 if word_count >= 25 else -8 if word_count < 12 else 0)))
+    teamwork_score = max(25, min(100, base["score"] + (10 if has_teamwork else -5)))
+    leadership_score = max(20, min(100, base["score"] + (10 if has_leadership else -8)))
+    problem_solving_score = max(30, min(100, base["score"] + (8 if has_problem else -4)))
+    personality_attitude_score = max(35, min(100, base["score"] + (6 if has_result else 0)))
+    cultural_fit_score = max(35, min(100, int(round((communication_score + teamwork_score + personality_attitude_score) / 3))))
+    star_score = max(25, min(100, int(round(base["score"] + star_hits * 8 + (8 if has_result else 0) - (8 if word_count < 16 else 0)))))
+    hr_readiness_score = max(
+        30,
+        min(
+            100,
+            int(round((communication_score + confidence_score + problem_solving_score + cultural_fit_score + star_score) / 5)),
+        ),
+    )
+
+    if word_count < 14:
+        base["feedback"] = (
+            "Your answer was understandable, but it needs more detail and a clearer example. "
+            "Try using a situation, the action you took, and the final result."
+        )
+    elif star_score >= 75 and hr_readiness_score >= 75:
+        base["feedback"] = (
+            "This answer felt interview-ready. You gave useful context, explained your action clearly, "
+            "and showed a meaningful result or lesson."
+        )
+    else:
+        base["feedback"] = (
+            "Your answer had the right direction, but it would be stronger with clearer structure, "
+            "more specific actions, and a sharper outcome."
+        )
+
+    base["suggested_answer"] = (
+        "Open with the situation, explain the exact action you took, and close with the outcome, learning, "
+        "or business impact."
+    )
+    base["communication_score"] = communication_score
+    base["confidence_score"] = confidence_score
+    base["problem_solving_score"] = problem_solving_score
+    base["teamwork_score"] = teamwork_score
+    base["leadership_score"] = leadership_score
+    base["hr_readiness_score"] = hr_readiness_score
+    base["personality_attitude_score"] = personality_attitude_score
+    base["cultural_fit_score"] = cultural_fit_score
+    base["star_score"] = star_score
+    return base
 
 
 KNOWN_LANGUAGES = {
@@ -1288,6 +1500,76 @@ def _extract_preferred_language(text: str, languages: List[str]) -> str:
     return languages[0] if len(languages) == 1 else ""
 
 
+def _build_hr_phase_plan(question_count: int) -> List[str]:
+    if question_count <= 3:
+        return ["introduction", "behavioral", "closing"]
+    if question_count == 4:
+        return ["introduction", "motivation", "situational", "closing"]
+    if question_count == 5:
+        return ["introduction", "background", "behavioral", "situational", "closing"]
+    if question_count == 6:
+        return ["introduction", "background", "motivation", "behavioral", "situational", "closing"]
+    if question_count == 7:
+        return ["introduction", "background", "motivation", "behavioral", "behavioral", "situational", "closing"]
+
+    plan = ["introduction", "background", "motivation", "behavioral", "behavioral", "communication", "situational", "closing"]
+    while len(plan) < question_count:
+        plan.insert(-2, "behavioral")
+    return plan[: question_count - 1] + ["closing"]
+
+
+def _build_focus_plan(focus_areas: List[str], question_count: int) -> List[str]:
+    cleaned = [item for item in _safe_list(focus_areas) if item]
+    if not cleaned:
+        cleaned = ["Communication", "Leadership", "Problem-solving", "Teamwork", "Confidence"]
+    return [cleaned[index % len(cleaned)] for index in range(question_count)]
+
+
+def _build_hr_adaptive_state(payload: Dict[str, Any], question_count: int) -> Dict[str, Any]:
+    focus_areas = _selected_focus_areas(payload)
+    resolved_focus_areas = focus_areas or ["Communication", "Leadership", "Problem-solving", "Teamwork", "Confidence"]
+    return {
+        "enabled": True,
+        "mode": "hr",
+        "scored_question_target": question_count,
+        "discovery_questions_asked": 0,
+        "clarification_turns": 0,
+        "discovery_complete": True,
+        "focus_areas": resolved_focus_areas,
+        "focus_plan": _build_focus_plan(resolved_focus_areas, question_count),
+        "covered_topics": [],
+        "scored_questions_answered": 0,
+        "technical_questions_answered": 0,
+        "hr_questions_answered": 0,
+        "hr_question_target": question_count,
+        "role_label": _normalize_text(payload.get("job_role") or "Candidate"),
+        "confidence_summary": "",
+        "round_mode": _hr_round_mode(payload),
+        "phase_plan": _build_hr_phase_plan(question_count),
+    }
+
+
+def _next_hr_phase(state: Dict[str, Any]) -> str:
+    plan = state.get("phase_plan") or ["behavioral"]
+    index = min(int(state.get("scored_questions_answered", 0)), max(len(plan) - 1, 0))
+    return _normalize_text(plan[index] or "behavioral") or "behavioral"
+
+
+def _next_hr_focus(state: Dict[str, Any], last_question: Optional[Dict[str, Any]] = None) -> str:
+    focus_plan = [item for item in _safe_list(state.get("focus_plan") or []) if item]
+    question_index = int(state.get("scored_questions_answered", 0))
+    if focus_plan:
+        return focus_plan[min(question_index, len(focus_plan) - 1)]
+    focus_areas = [item for item in _safe_list(state.get("focus_areas") or []) if item]
+    covered = {item.lower() for item in state.get("covered_topics") or []}
+    last_topic = _normalize_text((last_question or {}).get("topic_tag") or "")
+    for focus in focus_areas:
+        lowered = focus.lower()
+        if lowered not in covered and lowered != last_topic.lower():
+            return focus
+    return last_topic or (focus_areas[0] if focus_areas else "Communication")
+
+
 def _adaptive_role_interview_enabled(payload: Dict[str, Any]) -> bool:
     category = _normalize_text(payload.get("category") or "").lower()
     if category not in {"technical", "mock"}:
@@ -1295,12 +1577,449 @@ def _adaptive_role_interview_enabled(payload: Dict[str, Any]) -> bool:
     selected_mode = payload.get("selected_mode") or (
         "language" if payload.get("primary_language") else "role" if payload.get("job_role") else "general"
     )
-    return _normalize_text(selected_mode).lower() == "role" and bool(_normalize_text(payload.get("job_role") or ""))
+    selected_mode = _normalize_text(selected_mode).lower()
+    if selected_mode == "role":
+        return bool(_normalize_text(payload.get("job_role") or ""))
+    if selected_mode == "language":
+        return bool(_normalize_text(payload.get("primary_language") or ""))
+    return False
 
 
-def _adaptive_intro(payload: Dict[str, Any], question_count: int) -> str:
+def _build_technical_phase_plan(question_count: int) -> List[str]:
+    if question_count <= 1:
+        return ["warmup"]
+    if question_count == 2:
+        return ["warmup", "real_world_scenario"]
+    if question_count == 3:
+        return ["warmup", "concept_deep_dive", "real_world_scenario"]
+    if question_count == 4:
+        return ["warmup", "concept_deep_dive", "structured_thinking", "real_world_scenario"]
+
+    plan = ["warmup", "concept_deep_dive", "structured_thinking", "real_world_scenario"]
+    extra_cycle = ["concept_deep_dive", "structured_thinking", "real_world_scenario"]
+    cycle_index = 0
+    while len(plan) < question_count:
+        plan.insert(-1, extra_cycle[cycle_index % len(extra_cycle)])
+        cycle_index += 1
+    return plan[:question_count]
+
+
+def _next_adaptive_phase(state: Dict[str, Any], desired_track: str) -> str:
+    if desired_track == "hr":
+        return "behavioral_bridge"
+    plan = [item for item in _safe_list(state.get("technical_phase_plan") or []) if item]
+    if not plan:
+        return "concept_deep_dive"
+    index = min(int(state.get("technical_questions_answered", 0)), max(len(plan) - 1, 0))
+    return _normalize_text(plan[index] or "concept_deep_dive") or "concept_deep_dive"
+
+
+def _detect_interview_control_command(value: str) -> Optional[str]:
+    normalized = _normalize_text(value).lower()
+    if not normalized:
+        return None
+    word_count = len([word for word in normalized.split() if word])
+    if word_count > 10:
+        return None
+
+    repeat_patterns = [
+        r"^repeat$",
+        r"^repeat again$",
+        r"^repeat question$",
+        r"^repeat the question$",
+        r"^say again$",
+        r"^say that again$",
+        r"^say the question again$",
+        r"^can you repeat$",
+        r"^can you repeat that$",
+        r"^can you repeat the question$",
+        r"^could you repeat that$",
+        r"^please repeat$",
+        r"^please repeat that$",
+        r"^please repeat the question$",
+        r"^one more time$",
+        r"^sorry repeat$",
+        r"^i did not catch that$",
+        r"^i didn't catch that$",
+        r"^pardon$",
+    ]
+    clarify_patterns = [
+        r"^(i )?do not understand$",
+        r"^(i )?do not understand the question$",
+        r"^(i )?don't understand$",
+        r"^(i )?don't understand the question$",
+        r"^(i )?did not understand$",
+        r"^(i )?did not understand the question$",
+        r"^(i )?didn't understand$",
+        r"^(i )?didn't understand the question$",
+        r"^(i )?cannot understand$",
+        r"^(i )?cannot understand the question$",
+        r"^(i )?can't understand$",
+        r"^(i )?can't understand the question$",
+        r"^can you explain$",
+        r"^can you explain that$",
+        r"^can you explain the question$",
+        r"^could you explain$",
+        r"^could you explain that$",
+        r"^could you explain the question$",
+        r"^please explain$",
+        r"^please explain the question$",
+        r"^clarify$",
+        r"^clarify the question$",
+        r"^simplify$",
+        r"^simplify the question$",
+        r"^make it simpler$",
+        r"^what do you mean$",
+        r"^what does that mean$",
+        r"^i am confused$",
+        r"^i'm confused$",
+    ]
+
+    if any(re.fullmatch(pattern, normalized) for pattern in repeat_patterns):
+        return "repeat"
+    if any(re.fullmatch(pattern, normalized) for pattern in clarify_patterns):
+        return "clarify"
+    return None
+
+
+def _detect_end_interview_request(value: str) -> bool:
+    normalized = _normalize_text(value).lower()
+    if not normalized:
+        return False
+    patterns = [
+        r"^end interview$",
+        r"^end the interview$",
+        r"^please end the interview$",
+        r"^i want to end the interview$",
+        r"^i want to stop the interview$",
+        r"^stop the interview$",
+        r"^finish the interview$",
+        r"^can we end the interview$",
+        r"^let us end the interview$",
+        r"^let's end the interview$",
+        r"^please stop the interview$",
+    ]
+    return any(re.fullmatch(pattern, normalized) for pattern in patterns)
+
+
+def _detect_confirmation_reply(value: str) -> Optional[str]:
+    normalized = _normalize_text(value).lower()
+    if not normalized:
+        return None
+    word_count = len([word for word in normalized.split() if word])
+    if word_count > 8:
+        return None
+
+    yes_patterns = [
+        r"^yes$",
+        r"^yes please$",
+        r"^yes end it$",
+        r"^yes end the interview$",
+        r"^please end it$",
+        r"^please end the interview$",
+        r"^end the interview$",
+        r"^confirm$",
+        r"^okay end it$",
+        r"^ok end it$",
+        r"^sure$",
+        r"^yep$",
+        r"^yeah$",
+    ]
+    no_patterns = [
+        r"^no$",
+        r"^no please$",
+        r"^no continue$",
+        r"^continue$",
+        r"^continue interview$",
+        r"^do not end it$",
+        r"^don't end it$",
+        r"^dont end it$",
+        r"^keep going$",
+        r"^let us continue$",
+        r"^let's continue$",
+        r"^resume$",
+        r"^not now$",
+    ]
+
+    if any(re.fullmatch(pattern, normalized) for pattern in yes_patterns):
+        return "yes"
+    if any(re.fullmatch(pattern, normalized) for pattern in no_patterns):
+        return "no"
+    return None
+
+
+def _detect_off_topic_small_talk(value: str) -> Optional[str]:
+    normalized = _normalize_text(value).lower()
+    if not normalized:
+        return None
+    word_count = len([word for word in normalized.split() if word])
+    if word_count > 18:
+        return None
+
+    patterns = {
+        "greeting": [
+            r"^hi$",
+            r"^hello$",
+            r"^hey$",
+            r"^good morning$",
+            r"^good afternoon$",
+            r"^good evening$",
+            r"^nice to meet you$",
+            r"^howdy$",
+        ],
+        "identity": [
+            r"^what(?:'s| is) your name.*$",
+            r"^who are you.*$",
+            r"^tell me your name.*$",
+            r"^what are you.*$",
+        ],
+        "wellbeing": [
+            r"^how are you.*$",
+            r"^how(?:'s| is) it going.*$",
+            r"^are you okay.*$",
+            r"^how have you been.*$",
+        ],
+        "personal_life": [
+            r"^are you married.*$",
+            r"^are you single.*$",
+            r"^do you have (?:a )?(?:wife|husband|girlfriend|boyfriend).*$",
+            r"^do you have children.*$",
+            r"^do you have kids.*$",
+            r"^tell me about your family.*$",
+            r"^what do you think about marriage.*$",
+            r"^tell me about marriage.*$",
+        ],
+        "background": [
+            r"^where are you from.*$",
+            r"^how old are you.*$",
+            r"^what is your age.*$",
+            r"^what religion are you.*$",
+            r"^what is your religion.*$",
+            r"^what caste are you.*$",
+            r"^what nationality are you.*$",
+        ],
+        "meta": [
+            r"^are you (?:an )?ai.*$",
+            r"^are you human.*$",
+            r"^are you real.*$",
+            r"^are you a robot.*$",
+            r"^which model are you.*$",
+            r"^what model are you.*$",
+            r"^are you chatgpt.*$",
+            r"^who made you.*$",
+            r"^who created you.*$",
+            r"^what can you do.*$",
+        ],
+        "casual": [
+            r"^what is your favorite .*",
+            r"^what's your favorite .*",
+            r"^do you like .*",
+            r"^what do you like .*",
+            r"^tell me a joke.*$",
+            r"^say a joke.*$",
+            r"^what is the weather.*$",
+            r"^how is the weather.*$",
+            r"^can we be friends.*$",
+            r"^do you love me.*$",
+        ],
+    }
+
+    for label, label_patterns in patterns.items():
+        if any(re.fullmatch(pattern, normalized) for pattern in label_patterns):
+            return label
+    return None
+
+
+def _build_question_clarification(
+    question_text: str,
+    question_type: str = "",
+    topic_tag: str = "",
+) -> str:
+    normalized = _normalize_text(question_text).lower()
+    question_type = _normalize_text(question_type).lower()
+    topic = _normalize_text(topic_tag)
+
+    if not normalized:
+        return "Sure. Let me make that simpler, then I will repeat the same question."
+    if question_type in {"fundamental", "conceptual"} or normalized.startswith("what is") or normalized.startswith("explain"):
+        focus = topic or "the concept"
+        return (
+            f"Sure. Keep it simple: define {focus}, explain how it works in plain language, "
+            "and give one small example. I will repeat the same question."
+        )
+    if question_type == "scenario" or any(marker in normalized for marker in ("imagine", "production", "slowing", "failure", "incident")):
+        return (
+            "Sure. Start with what you would check first, how you would narrow the issue down, "
+            "and what trade-offs you would consider. I will repeat the same question."
+        )
+    if question_type == "practical" or any(marker in normalized for marker in ("walk me through", "approach", "how would you", "what data structure")):
+        return (
+            "Sure. Answer step by step. Explain your approach first, mention the main data structure or components you would use, "
+            "and then add the key trade-offs or complexity. I will repeat the same question."
+        )
+    if any(marker in normalized for marker in ("tell me about a time", "describe a time")):
+        return (
+            "Sure. Briefly explain the situation, what you did, and the result. "
+            "I will repeat the same question."
+        )
+    return "Sure. Answer directly, keep it structured, and add one clear example or outcome where possible. I will repeat the same question."
+
+
+def _build_control_turn_response(
+    session: Dict[str, Any],
+    question_index: int,
+    question: Dict[str, Any],
+    command: str,
+    assistant_reply: Optional[str] = None,
+    feedback: str = "",
+    suggestions: Optional[List[str]] = None,
+    next_question: Optional[str] = None,
+    next_question_type: Optional[str] = None,
+    answer_text: str = "",
+    should_end_interview: bool = False,
+) -> Dict[str, Any]:
+    prompt = _normalize_text(question.get("question") or "")
+    question_type = _normalize_text(question.get("question_type") or "practical")
+    topic_tag = _normalize_text(question.get("topic_tag") or "")
+    spoken_reply = _normalize_text(
+        assistant_reply
+        or (
+            "Sure. I will repeat the same question."
+            if command == "repeat"
+            else _build_question_clarification(prompt, question_type, topic_tag)
+        )
+    )
+    next_prompt = prompt if next_question is None else _normalize_text(next_question)
+    next_prompt_type = _normalize_text(next_question_type or question_type) or "practical"
+
+    return {
+        "question_id": question["id"],
+        "question": prompt,
+        "question_type": question_type or "practical",
+        "interview_phase": _normalize_text(question.get("interview_phase") or ""),
+        "answer": _normalize_text(answer_text),
+        "score": 0,
+        "feedback": _normalize_text(feedback),
+        "strengths": [],
+        "gaps": [],
+        "matched_points": [],
+        "missed_points": [],
+        "suggested_answer": "",
+        "assistant_reply": spoken_reply,
+        "relevance": "",
+        "correctness": "",
+        "clarity": "",
+        "technical_depth": "",
+        "logical_validity": "",
+        "real_world_applicability": "",
+        "suggestions": _safe_list(suggestions)[:3],
+        "provider": "command",
+        "count_towards_score": False,
+        "communication_score": None,
+        "confidence_score": None,
+        "problem_solving_score": None,
+        "teamwork_score": None,
+        "leadership_score": None,
+        "hr_readiness_score": None,
+        "personality_attitude_score": None,
+        "cultural_fit_score": None,
+        "star_score": None,
+        "question_index": question_index,
+        "is_complete": False,
+        "next_question": next_prompt,
+        "next_question_type": next_prompt_type,
+        "next_interview_phase": _normalize_text(question.get("interview_phase") or ""),
+        "progress": {
+            "current": question_index,
+            "total": _session_total_questions(session),
+        },
+        "providers": dict(session.get("providers", {})),
+        "question_outline": session.get("question_outline", []),
+        "is_control_turn": True,
+        "control_command": command,
+        "should_end_interview": bool(should_end_interview),
+    }
+
+
+def _build_off_topic_control_response(
+    session: Dict[str, Any],
+    question_index: int,
+    question: Dict[str, Any],
+    answer_text: str,
+    off_topic_kind: str,
+) -> Dict[str, Any]:
+    topic_label = _normalize_text(question.get("topic_tag") or question.get("question_type") or "this topic")
+    if off_topic_kind == "greeting":
+        opener = "We can skip the small talk and stay with the interview."
+    elif off_topic_kind == "identity":
+        opener = "My role here is to interview you, not to discuss me."
+    elif off_topic_kind == "wellbeing":
+        opener = "I appreciate that, but we need to stay with the interview."
+    elif off_topic_kind == "personal_life":
+        opener = "That is not appropriate for the current interview question, so let us keep this professional."
+    elif off_topic_kind == "background":
+        opener = "That is not relevant to this interview question."
+    elif off_topic_kind == "meta":
+        opener = "Questions about the interviewer or the system are not relevant to your answer."
+    else:
+        opener = "That is not related to the question I asked."
+
+    assistant_reply = (
+        f"{opener} In a real interview, going off-topic weakens your answer and shows poor focus. "
+        f"Please answer the current question about {topic_label} directly."
+    )
+    feedback = (
+        f"Your response was not relevant to the question. In a real interview, this would be treated as poor focus and a weak answer. "
+        f"Stay on {topic_label}, answer the prompt directly, and avoid unrelated personal or casual conversation."
+    )
+    suggestions = [
+        f"Answer the question directly about {topic_label} before saying anything else.",
+        "If you need help, ask me to repeat or clarify the question instead of changing the topic.",
+        "Add one relevant example only after you have addressed the actual prompt.",
+    ]
+    return _build_control_turn_response(
+        session,
+        question_index,
+        question,
+        "off_topic",
+        assistant_reply=assistant_reply,
+        feedback=feedback,
+        suggestions=suggestions,
+        next_question=_normalize_text(question.get("question") or ""),
+        next_question_type=_normalize_text(question.get("question_type") or "practical"),
+        answer_text=answer_text,
+    )
+
+
+def _adaptive_closing_message(
+    session: Dict[str, Any],
+    question: Dict[str, Any],
+    evaluation: Dict[str, Any],
+) -> str:
+    role_label = _normalize_text(session.get("meta", {}).get("adaptive_state", {}).get("role_label") or session.get("context", {}).get("job_role") or "this role")
+    topic = _normalize_text(question.get("topic_tag") or question.get("question_type") or "the discussion")
+    score = int(evaluation.get("score") or 0)
+
+    if score >= 80:
+        performance_note = f"You handled the discussion around {topic} confidently."
+    elif score >= 60:
+        performance_note = f"You showed a solid base in {topic}."
+    else:
+        performance_note = f"You stayed engaged through some challenging {role_label} questions."
+
+    return (
+        "That brings us to the end of the interview. "
+        f"{performance_note} "
+        "If this were a live round, this is where I would ask: do you have any questions for me?"
+    )
+
+
+def _adaptive_intro_legacy(payload: Dict[str, Any], question_count: int) -> str:
+    selected_mode = _normalize_text(payload.get("selected_mode") or "").lower()
     role = _normalize_text(payload.get("job_role") or "the selected role")
+    language = _normalize_text(payload.get("primary_language") or "the selected language")
     category = _normalize_text(payload.get("category") or "").lower()
+    subject = language if selected_mode == "language" and language else role
     if category == "mock":
         return (
             f"Hello, I’m your AI interviewer for this {role} mock interview. "
@@ -1314,7 +2033,7 @@ def _adaptive_intro(payload: Dict[str, Any], question_count: int) -> str:
     )
 
 
-def _adaptive_discovery_question(payload: Dict[str, Any], variation: Optional[Dict[str, str]] = None) -> str:
+def _adaptive_discovery_question_legacy(payload: Dict[str, Any], variation: Optional[Dict[str, str]] = None) -> str:
     role = _normalize_text(payload.get("job_role") or "this role")
     role_lower = role.lower()
     shuffler = random.Random(_normalize_text((variation or {}).get("seed") or role or "adaptive"))
@@ -1335,13 +2054,17 @@ def _adaptive_discovery_question(payload: Dict[str, Any], variation: Optional[Di
 
 def _build_adaptive_state(payload: Dict[str, Any], role_blueprint: Dict[str, Any], question_count: int) -> Dict[str, Any]:
     category = _normalize_text(payload.get("category") or "").lower()
+    selected_mode = _normalize_text(payload.get("selected_mode") or "").lower()
     primary_language = _normalize_text(payload.get("primary_language") or role_blueprint.get("language_focus") or "")
     include_hr = category == "mock"
     hr_target = 0 if not include_hr else (1 if question_count <= 5 else 2)
+    technical_target = max(1, question_count - hr_target)
     return {
         "enabled": True,
         "include_hr": include_hr,
+        "selected_mode": selected_mode or ("language" if primary_language else "role"),
         "scored_question_target": question_count,
+        "technical_question_target": technical_target,
         "discovery_questions_asked": 1,
         "clarification_turns": 0,
         "discovery_complete": False,
@@ -1356,9 +2079,65 @@ def _build_adaptive_state(payload: Dict[str, Any], role_blueprint: Dict[str, Any
         "technical_questions_answered": 0,
         "hr_questions_answered": 0,
         "hr_question_target": hr_target,
-        "role_label": _normalize_text(role_blueprint.get("role_label") or payload.get("job_role") or "Technical Role"),
+        "role_label": _normalize_text(
+            payload.get("job_role")
+            or role_blueprint.get("role_label")
+            or (f"{primary_language} technical focus" if primary_language else "Technical Role")
+        ),
         "confidence_summary": "",
+        "difficulty_guidance": _difficulty_from_experience(payload.get("experience") or ""),
+        "technical_phase_plan": _build_technical_phase_plan(technical_target),
+        "last_phase": "",
     }
+
+
+def _adaptive_intro(payload: Dict[str, Any], question_count: int) -> str:
+    selected_mode = _normalize_text(payload.get("selected_mode") or "").lower()
+    role = _normalize_text(payload.get("job_role") or "the selected role")
+    language = _normalize_text(payload.get("primary_language") or "the selected language")
+    category = _normalize_text(payload.get("category") or "").lower()
+    subject = language if selected_mode == "language" and language else role
+    if category == "mock":
+        return (
+            f"Hi, nice to meet you. I will be taking your {subject} mock interview today. "
+            "Let us keep this conversational, and feel free to think out loud. "
+            "I will first understand where you are strongest, then I will adapt the interview one question at a time. "
+            "Because this is a mock round, I may include a short behavioral section near the end as well."
+        )
+    return (
+        f"Hi, nice to meet you. I will be taking your {subject} technical interview today. "
+        "Let us keep this conversational, and feel free to think out loud. "
+        "I will first confirm the technical area you want to focus on, then I will adapt the next questions based on your answers. "
+        f"I will keep the interview technical and tailor the next {question_count} scored questions to your strengths."
+    )
+
+
+def _adaptive_discovery_question(payload: Dict[str, Any], variation: Optional[Dict[str, str]] = None) -> str:
+    role = _normalize_text(payload.get("job_role") or "this role")
+    selected_mode = _normalize_text(payload.get("selected_mode") or "").lower()
+    language = _normalize_text(payload.get("primary_language") or "")
+    role_lower = role.lower()
+    shuffler = random.Random(_normalize_text((variation or {}).get("seed") or role or language or "adaptive"))
+    if selected_mode == "language" and language:
+        options = [
+            f"Before we begin properly, what kinds of {language} problems, projects, or fundamentals are you most comfortable discussing today?",
+            f"To tailor this {language} round well, which parts of {language} do you feel strongest in from real work or practice?",
+            f"To get the interview aligned properly, what have you used {language} for most confidently so far?",
+        ]
+        return shuffler.choice(options)
+    if any(keyword in role_lower for keyword in ("backend", "full stack", "full-stack", "fullstack", "software engineer", "software developer")):
+        options = [
+            f"To start, which backend languages, frameworks, databases, or tools are you most comfortable with for this {role} role?",
+            f"Before we go deeper, which backend stack do you actually feel strongest with for this {role} role?",
+            f"To get the interview aligned properly, which backend technologies have you used most confidently in real work for this {role} role?",
+        ]
+    else:
+        options = [
+            f"To start, which languages, frameworks, tools, or technical areas are you most comfortable with for this {role} role?",
+            f"Before we dive in, which technical stack or problem areas would you like me to focus on first for this {role} role?",
+            f"To tailor this interview properly, which technologies or technical areas do you feel strongest with for this {role} role?",
+        ]
+    return shuffler.choice(options)
 
 
 def _append_session_question(session: Dict[str, Any], question_payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1374,6 +2153,7 @@ def _append_session_question(session: Dict[str, Any], question_payload: Dict[str
         "evaluation_focus": _safe_list(question_payload.get("evaluation_focus"))[:4],
         "count_towards_score": bool(question_payload.get("count_towards_score", True)),
         "topic_tag": _normalize_text(question_payload.get("topic_tag") or ""),
+        "interview_phase": _normalize_text(question_payload.get("interview_phase") or ""),
     }
 
     session.setdefault("questions", []).append(question)
@@ -1382,6 +2162,7 @@ def _append_session_question(session: Dict[str, Any], question_payload: Dict[str
             "id": question["id"],
             "question": question["question"],
             "question_type": question["question_type"],
+            "interview_phase": question["interview_phase"],
         }
     )
     return question
@@ -1391,6 +2172,11 @@ def _adaptive_total_questions(session: Dict[str, Any]) -> int:
     state = session.get("meta", {}).get("adaptive_state") or {}
     if not state.get("enabled"):
         return len(session.get("questions", []))
+    if _normalize_text(state.get("mode") or "").lower() == "hr":
+        return max(
+            len(session.get("questions", [])),
+            int(state.get("scored_question_target", 0)),
+        )
     return max(
         len(session.get("questions", [])),
         int(state.get("scored_question_target", 0)) + max(1, int(state.get("discovery_questions_asked", 1))),
@@ -1398,15 +2184,32 @@ def _adaptive_total_questions(session: Dict[str, Any]) -> int:
 
 
 def _adaptive_state_summary(state: Dict[str, Any]) -> str:
+    if _normalize_text(state.get("mode") or "").lower() == "hr":
+        return "\n".join(
+            [
+                f"Role label: {state.get('role_label') or 'Not specified'}",
+                f"Round mode: {state.get('round_mode') or 'hr_behavioral'}",
+                f"Focus areas: {', '.join(state.get('focus_areas') or []) or 'General HR'}",
+                f"Focus plan: {', '.join(state.get('focus_plan') or []) or 'Adaptive'}",
+                f"Phase plan: {', '.join(state.get('phase_plan') or []) or 'Adaptive'}",
+                f"Confidence summary: {state.get('confidence_summary') or 'Not confirmed yet'}",
+                f"Covered topics: {', '.join(state.get('covered_topics') or []) or 'None yet'}",
+                f"Questions answered: {state.get('scored_questions_answered', 0)}",
+            ]
+        )
     return "\n".join(
         [
             f"Role label: {state.get('role_label') or 'Not specified'}",
+            f"Selected mode: {state.get('selected_mode') or 'role'}",
             f"Preferred language: {state.get('preferred_language') or 'Not confirmed'}",
             f"Languages mentioned: {', '.join(state.get('languages') or []) or 'None yet'}",
             f"Frameworks mentioned: {', '.join(state.get('frameworks') or []) or 'None yet'}",
             f"Databases mentioned: {', '.join(state.get('databases') or []) or 'None yet'}",
             f"Tools mentioned: {', '.join(state.get('tools') or []) or 'None yet'}",
             f"Focus areas: {', '.join(state.get('focus_areas') or []) or 'None yet'}",
+            f"Technical phase plan: {', '.join(state.get('technical_phase_plan') or []) or 'Adaptive'}",
+            f"Next technical phase: {_next_adaptive_phase(state, 'technical')}",
+            f"Difficulty guidance: {state.get('difficulty_guidance') or 'moderate'}",
             f"Confidence summary: {state.get('confidence_summary') or 'Not confirmed yet'}",
             f"Covered topics: {', '.join(state.get('covered_topics') or []) or 'None yet'}",
             f"Technical questions answered: {state.get('technical_questions_answered', 0)}",
@@ -1416,6 +2219,7 @@ def _adaptive_state_summary(state: Dict[str, Any]) -> str:
 
 
 def _fallback_stack_analysis(answer_text: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    selected_mode = _normalize_text(payload.get("selected_mode") or "").lower()
     languages = _extract_known_terms(answer_text, KNOWN_LANGUAGES)
     frameworks = _extract_known_terms(answer_text, KNOWN_FRAMEWORKS)
     databases = _extract_known_terms(answer_text, KNOWN_DATABASES)
@@ -1455,6 +2259,11 @@ def _fallback_stack_analysis(answer_text: str, payload: Dict[str, Any]) -> Dict[
         clarification_question = (
             f"You mentioned {', '.join(languages[:3])}. Which one would you like me to focus on first for this interview?"
         )
+    elif selected_mode == "language" and preferred_language and not frameworks and not databases and not tools:
+        needs_clarification = True
+        clarification_question = (
+            f"Within {preferred_language}, which areas should I focus on first: fundamentals, debugging, problem solving, APIs, or project experience?"
+        )
     elif not languages and not frameworks:
         needs_clarification = True
         clarification_question = (
@@ -1466,7 +2275,7 @@ def _fallback_stack_analysis(answer_text: str, payload: Dict[str, Any]) -> Dict[
     if preferred_language:
         focus_areas = _merge_unique([preferred_language], focus_areas)
 
-    stack_summary = ", ".join(focus_areas[:4]) or "your preferred stack"
+    stack_summary = ", ".join(focus_areas[:4]) or (preferred_language or "your preferred stack")
     acknowledgement = (
         f"Thanks. I will tailor the interview around {stack_summary}."
         if stack_summary
@@ -1597,7 +2406,7 @@ def _next_uncovered_topic(session: Dict[str, Any], last_question: Optional[Dict[
     return last_topic or _normalize_text(state.get("preferred_language") or "") or _normalize_text(session.get("context", {}).get("job_role") or "backend fundamentals")
 
 
-def _fallback_adaptive_question(
+def _fallback_adaptive_question_legacy(
     session: Dict[str, Any],
     last_question: Optional[Dict[str, Any]],
     evaluation: Optional[Dict[str, Any]],
@@ -1671,6 +2480,147 @@ def _fallback_adaptive_question(
     }
 
 
+def _fallback_adaptive_question(
+    session: Dict[str, Any],
+    last_question: Optional[Dict[str, Any]],
+    evaluation: Optional[Dict[str, Any]],
+    desired_track: str,
+) -> Dict[str, Any]:
+    state = session.get("meta", {}).get("adaptive_state") or {}
+    context = session.get("context", {}) or {}
+    role = _normalize_text(context.get("job_role") or state.get("role_label") or "the role")
+    preferred_language = _normalize_text(state.get("preferred_language") or "")
+    score = int((evaluation or {}).get("score") or 0)
+    phase = _next_adaptive_phase(state, desired_track)
+    topic = _next_uncovered_topic(session, last_question)
+    difficulty_guidance = _normalize_text(state.get("difficulty_guidance") or "moderate")
+    selected_mode = _normalize_text(state.get("selected_mode") or context.get("selected_mode") or "").lower()
+    subject = preferred_language if selected_mode == "language" and preferred_language else role
+
+    if desired_track == "hr":
+        return {
+            "assistant_reply": "Good. Before we wrap up, I also want to understand how you handle communication, ownership, and pressure.",
+            "question": (
+                f"Tell me about a time you had to explain a technical decision, handle pressure, or coordinate with others while working in {subject}. "
+                "What was the situation, what did you do, and what happened?"
+            ),
+            "question_type": "behavioral",
+            "expected_points": [
+                "clear situation",
+                "specific actions taken",
+                "communication or prioritization choices",
+                "result and learning",
+            ],
+            "evaluation_focus": ["structure", "ownership", "communication"],
+            "topic_tag": "behavioral ownership",
+            "interview_phase": "behavioral_bridge",
+        }
+
+    if phase == "warmup":
+        topic_label = topic or preferred_language or "your strongest technical area"
+        return {
+            "assistant_reply": "Thanks. Let us start with something simple and settle into the conversation.",
+            "question": (
+                f"Can you explain one core concept in {topic_label} that you are comfortable with, "
+                "and give a small real example of where you would use it?"
+            ),
+            "question_type": "fundamental",
+            "expected_points": [
+                "clear definition in simple terms",
+                "main purpose or behavior",
+                "one concrete example",
+                "confident and structured explanation",
+            ],
+            "evaluation_focus": ["clarity", "confidence", "fundamentals"],
+            "topic_tag": topic_label,
+            "interview_phase": phase,
+        }
+
+    if phase == "concept_deep_dive":
+        if score < 55:
+            return {
+                "assistant_reply": "You are on the right track. Let us keep it concrete and stay with the same topic for a moment.",
+                "question": (
+                    f"No problem. Can you give me one real example of using {topic}, what problem it solved, "
+                    "and why you chose that approach?"
+                ),
+                "question_type": "practical",
+                "expected_points": [
+                    "clear project context",
+                    "specific implementation detail",
+                    "why the choice made sense",
+                    "result or lesson",
+                ],
+                "evaluation_focus": ["specificity", "practical detail", "clarity"],
+                "topic_tag": topic,
+                "interview_phase": phase,
+            }
+        return {
+            "assistant_reply": "Good. Let us go one level deeper on that.",
+            "question": (
+                f"How is {topic} different from the closest alternative you would compare it with, "
+                "and when would you choose one over the other in a real system?"
+            ),
+            "question_type": "conceptual",
+            "expected_points": [
+                "clear comparison",
+                "important trade-offs",
+                "real usage choice",
+                "structured reasoning",
+            ],
+            "evaluation_focus": ["conceptual depth", "trade-offs", "clarity"],
+            "topic_tag": topic,
+            "interview_phase": phase,
+        }
+
+    if phase == "structured_thinking":
+        follow_up = (
+            "Keep it step by step and simple."
+            if "introductory" in difficulty_guidance
+            else "Call out the data structure, time complexity, and any optimization if it matters."
+        )
+        return {
+            "assistant_reply": "That makes sense. Let us do a more structured problem-solving question next.",
+            "question": (
+                "Imagine you are given a technical problem on the spot. "
+                f"Walk me through how you would approach it before writing code. {follow_up}"
+            ),
+            "question_type": "practical",
+            "expected_points": [
+                "step-by-step approach",
+                "data structure or system choice",
+                "time or space complexity awareness",
+                "possible optimization or trade-off",
+            ],
+            "evaluation_focus": ["problem solving", "structure", "clarity"],
+            "topic_tag": topic or "problem solving",
+            "interview_phase": phase,
+        }
+
+    scenario_suffix = (
+        "What trade-offs would you consider while optimizing it?"
+        if "advanced" in difficulty_guidance
+        else "Explain it step by step in simple terms."
+    )
+    return {
+        "assistant_reply": "Good. Let us finish with a more real-world scenario.",
+        "question": (
+            f"Imagine an application in {subject} is slowing down because of growing data or traffic. "
+            f"How would you identify the issue, decide what to change first, and improve it? {scenario_suffix}"
+        ),
+        "question_type": "scenario",
+        "expected_points": [
+            "clear investigation steps",
+            "useful debugging or observability signals",
+            "prioritized fix or optimization plan",
+            "trade-offs or practical impact",
+        ],
+        "evaluation_focus": ["debug mindset", "real-world judgment", "clarity"],
+        "topic_tag": topic or "system performance",
+        "interview_phase": "real_world_scenario",
+    }
+
+
 async def _generate_adaptive_question(
     session: Dict[str, Any],
     last_question: Optional[Dict[str, Any]],
@@ -1680,8 +2630,11 @@ async def _generate_adaptive_question(
     state = session.get("meta", {}).get("adaptive_state") or {}
     variation = session.get("meta", {}).get("interview_variation") or {}
     desired_track = _next_adaptive_track(state)
+    next_phase = _next_adaptive_phase(state, desired_track)
     last_score = int((evaluation or {}).get("score") or 0)
-    role = _normalize_text(session.get("context", {}).get("job_role") or "the selected role")
+    context = session.get("context", {}) or {}
+    role = _normalize_text(context.get("job_role") or state.get("role_label") or "the selected role")
+    target_subject = _normalize_text(state.get("preferred_language") or role)
     prompt = f"""
 You are running a live adaptive AI interview one question at a time.
 
@@ -1701,32 +2654,45 @@ Recent turn:
 
 Remaining scored questions after the next turn: {max(0, int(state.get("scored_question_target", 0)) - int(state.get("scored_questions_answered", 0)) - 1)}
 Desired next track: {desired_track}
+Desired phase for the next question: {next_phase}
 Target role: {role}
+Primary technical subject: {target_subject}
 Session variation:
 {_variation_summary(variation)}
 
 Return valid JSON with this exact shape:
 {{
-  "assistant_reply": "one short conversational bridge",
+  "assistant_reply": "one short micro-feedback bridge before the next question",
   "question": "exactly one next interview question",
   "question_type": "fundamental | conceptual | practical | scenario | behavioral",
   "expected_points": ["3 to 5 concise expected answer points"],
   "evaluation_focus": ["3 concise evaluation criteria"],
-  "topic_tag": "short topic label"
+  "topic_tag": "short topic label",
+  "interview_phase": "{next_phase}"
 }}
 
 Rules:
 - Ask exactly one question.
 - Sound like a curious, calm, and supportive human interviewer.
 - Keep assistant_reply gentle, natural, and short, like a real interviewer speaking conversationally.
+- assistant_reply should act like real-time micro-feedback: briefly acknowledge what went well and, if helpful, mention one thing to improve before the next question.
 - Make the wording feel fresh for this session instead of using stock repeated phrasing.
 - If desired next track is technical, do not ask HR, self-introduction, motivation, or strengths and weaknesses questions.
-- If desired next track is technical and the last score was below 55, ask a simpler follow-up or ask for a concrete example on the same stack.
-- If desired next track is technical and the last score was 80 or above, go one level deeper on the same topic or a closely related backend concern.
-- If desired next track is technical and the last score was between 55 and 79, move to the next relevant backend topic.
+- If desired next track is technical and the phase is warmup, ask a confidence-building fundamentals question that lets the candidate settle in.
+- If desired next track is technical and the phase is concept_deep_dive, adapt strongly to answer quality:
+  - below 55: simplify, stay on the same topic, and ask for a concrete example.
+  - 55 to 79: ask for a clearer comparison, reasoning, or trade-off.
+  - 80 or above: go deeper on the same topic with edge cases, trade-offs, or system impact.
+- If desired next track is technical and the phase is structured_thinking, ask a no-code problem-solving question. Push for approach, data structure choice, complexity, and possible optimization.
+- If desired next track is technical and the phase is real_world_scenario, ask a practical debugging, scaling, performance, or production scenario.
 - If desired next track is hr, ask one realistic behavioral or communication question relevant to the role.
+- Match the depth to the difficulty guidance in the state summary:
+  - introductory to moderate: explain step by step and avoid abrupt jumps in difficulty.
+  - moderate to advanced: expect clearer trade-offs and stronger structure.
+  - advanced and scenario-based: push into edge cases, scaling, resilience, and decision trade-offs.
 - Prefer the candidate's preferred language, frameworks, and tools when known.
 - Avoid repeating covered topics unless you are intentionally following up on a weak answer.
+- Encourage a human interview feel. Phrases like "walk me through", "talk me through your approach", or "feel free to think out loud" are good when natural.
 - Keep it professional, specific, and natural.
 - Do not use markdown.
 """
@@ -1745,6 +2711,7 @@ Rules:
             "expected_points": _safe_list(generated.get("expected_points"))[:5],
             "evaluation_focus": _safe_list(generated.get("evaluation_focus"))[:4],
             "topic_tag": _normalize_text(generated.get("topic_tag") or _next_uncovered_topic(session, last_question)),
+            "interview_phase": _normalize_text(generated.get("interview_phase") or next_phase),
         }
         if desired_track == "hr":
             question["question_type"] = "behavioral"
@@ -1802,9 +2769,11 @@ Return valid JSON:
 
 Rules:
 - Start naturally like a human interviewer.
+- The greeting should feel like a real interviewer opening the round, and it is good to say that the conversation can stay natural and the candidate can think out loud.
 - Ask only one question.
 - Do not assume the candidate's backend language or framework.
-- Ask the candidate which languages, frameworks, databases, or tools they are actually comfortable with.
+- If selected mode is language-based, ask which projects, problem types, or areas of that language they are most comfortable with.
+- Otherwise ask which languages, frameworks, databases, or tools they are actually comfortable with.
 - Keep the intro concise and warm.
 - Make the wording fresh for this session and avoid stock repeated phrasing.
 - If this is a mock interview, you may lightly mention that a short behavioral section can appear later.
@@ -1837,9 +2806,13 @@ def _register_scored_turn(state: Dict[str, Any], question: Dict[str, Any]) -> No
     if not question.get("count_towards_score", True):
         return
     state["scored_questions_answered"] = int(state.get("scored_questions_answered", 0)) + 1
+    state["last_phase"] = _normalize_text(question.get("interview_phase") or state.get("last_phase") or "")
     topic = _normalize_text(question.get("topic_tag") or "")
     if topic:
         state["covered_topics"] = _merge_unique(state.get("covered_topics") or [], [topic])
+    if _normalize_text(state.get("mode") or "").lower() == "hr":
+        state["hr_questions_answered"] = int(state.get("hr_questions_answered", 0)) + 1
+        return
     if question.get("question_type") == "behavioral":
         state["hr_questions_answered"] = int(state.get("hr_questions_answered", 0)) + 1
     else:
@@ -1860,6 +2833,7 @@ def _record_turn_result(
         "question_id": question["id"],
         "question": question["question"],
         "question_type": question.get("question_type", "practical"),
+        "interview_phase": _normalize_text(question.get("interview_phase") or ""),
         "answer": answer_text,
         "score": max(0, min(100, int(evaluation.get("score", 0)))),
         "feedback": _normalize_text(evaluation.get("feedback") or ""),
@@ -1878,6 +2852,15 @@ def _record_turn_result(
         "suggestions": _safe_list(evaluation.get("suggestions"))[:3],
         "provider": provider_used,
         "count_towards_score": bool(question.get("count_towards_score", True)),
+        "communication_score": _normalize_score_value(evaluation.get("communication_score")),
+        "confidence_score": _normalize_score_value(evaluation.get("confidence_score")),
+        "problem_solving_score": _normalize_score_value(evaluation.get("problem_solving_score")),
+        "teamwork_score": _normalize_score_value(evaluation.get("teamwork_score")),
+        "leadership_score": _normalize_score_value(evaluation.get("leadership_score")),
+        "hr_readiness_score": _normalize_score_value(evaluation.get("hr_readiness_score")),
+        "personality_attitude_score": _normalize_score_value(evaluation.get("personality_attitude_score")),
+        "cultural_fit_score": _normalize_score_value(evaluation.get("cultural_fit_score")),
+        "star_score": _normalize_score_value(evaluation.get("star_score")),
     }
 
     answers = session.setdefault("answers", [])
@@ -1898,6 +2881,7 @@ def _record_turn_result(
         "is_complete": is_complete,
         "next_question": next_question["question"] if next_question else None,
         "next_question_type": next_question.get("question_type") if next_question else None,
+        "next_interview_phase": _normalize_text(next_question.get("interview_phase") or "") if next_question else None,
         "progress": {
             "current": question_index + 1,
             "total": _adaptive_total_questions(session),
@@ -2026,6 +3010,489 @@ async def _create_adaptive_interview_session(
         "meta": session["meta"],
         "question_outline": session["question_outline"],
     }
+
+
+def _hr_intro_message(payload: Dict[str, Any], question_count: int) -> str:
+    role = _normalize_text(payload.get("job_role") or "candidate")
+    round_mode = _hr_round_mode(payload).replace("_", " / ")
+    focus = ", ".join(_selected_focus_areas(payload)[:3]) or "communication, leadership, and problem-solving"
+    return (
+        f"Hi! Nice to meet you. I will be taking your {round_mode} interview for a {role} candidate today. "
+        f"We will cover about {question_count} tailored questions with extra attention on {focus}."
+    )
+
+
+def _fallback_hr_opening_turn(payload: Dict[str, Any], question_count: int) -> Dict[str, Any]:
+    role = _normalize_text(payload.get("job_role") or "your target role")
+    return {
+        "assistant_intro": _hr_intro_message(payload, question_count),
+        "question": f"Let us start with a quick introduction. Tell me about yourself and how your background connects to {role}.",
+        "question_type": "introduction",
+        "expected_points": [
+            "clear summary of background or education",
+            "relevant experience or projects",
+            f"connection to {role}",
+            "confident and structured delivery",
+        ],
+        "evaluation_focus": ["clarity", "confidence", "structure"],
+        "topic_tag": "self introduction",
+    }
+
+
+async def _generate_hr_opening_turn(
+    payload: Dict[str, Any],
+    question_count: int,
+    variation: Optional[Dict[str, str]] = None,
+) -> Tuple[Dict[str, Any], str]:
+    variation = variation or _build_interview_variation(payload)
+    fallback = _fallback_hr_opening_turn(payload, question_count)
+    prompt = f"""
+You are a warm, professional AI HR interviewer starting a live adaptive interview.
+
+Interview context:
+{_context_summary(payload)}
+Session variation:
+{_variation_summary(variation)}
+
+Return valid JSON:
+{{
+  "assistant_intro": "short human-like greeting",
+  "question": "exactly one opening HR question",
+  "question_type": "introduction | conceptual | behavioral",
+  "expected_points": ["3 to 5 concise things the candidate should cover"],
+  "evaluation_focus": ["3 concise evaluation criteria"],
+  "topic_tag": "short topic label"
+}}
+
+Rules:
+- Start naturally like a real interviewer.
+- The first question should feel like greeting plus icebreaker.
+- Focus on self-introduction, background, or role connection.
+- Keep it short, warm, and conversational.
+- Avoid markdown.
+"""
+    try:
+        opening, provider = await _generate_json_with_fallback(
+            prompt,
+            ["gemini", "ollama"],
+            0.3,
+            STARTUP_AI_TIMEOUT_SECONDS,
+        )
+        normalized = {
+            "assistant_intro": _normalize_text(opening.get("assistant_intro") or fallback["assistant_intro"]),
+            "question": _normalize_text(opening.get("question") or fallback["question"]),
+            "question_type": _safe_question_type(opening.get("question_type") or fallback["question_type"]),
+            "expected_points": _safe_list(opening.get("expected_points"))[:5] or fallback["expected_points"],
+            "evaluation_focus": _safe_list(opening.get("evaluation_focus"))[:4] or fallback["evaluation_focus"],
+            "topic_tag": _normalize_text(opening.get("topic_tag") or fallback["topic_tag"]),
+        }
+        if not normalized["question"]:
+            raise ProviderError("HR opening turn returned an empty question.")
+        return normalized, provider
+    except ProviderError:
+        return fallback, "fallback"
+
+
+def _fallback_hr_adaptive_question(
+    session: Dict[str, Any],
+    last_question: Optional[Dict[str, Any]],
+    evaluation: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    state = session.get("meta", {}).get("adaptive_state") or {}
+    payload = session.get("context", {})
+    role = _normalize_text(payload.get("job_role") or "the role")
+    phase = _next_hr_phase(state)
+    focus = _next_hr_focus(state, last_question)
+    focus_label = _normalize_text(focus or "communication")
+    score = int((evaluation or {}).get("score") or 0)
+
+    assistant_reply = (
+        "Thanks. Let us make the next answer more concrete."
+        if score < 55
+        else "That was clear. Let us go one level deeper."
+        if score >= 80
+        else "Good. Let us move to the next area."
+    )
+
+    if phase == "background":
+        return {
+            "assistant_reply": assistant_reply,
+            "question": f"Walk me through the background, experiences, or projects that best prepared you for {role}, especially the parts that show your {focus_label.lower()}.",
+            "question_type": "conceptual",
+            "expected_points": [
+                "clear summary of relevant background",
+                "specific project or work example",
+                "skills gained from the experience",
+                f"fit with {role}",
+            ],
+            "evaluation_focus": ["clarity", "relevance", focus_label],
+            "topic_tag": focus_label,
+        }
+
+    if phase == "motivation":
+        return {
+            "assistant_reply": assistant_reply,
+            "question": f"What motivated you to pursue {role}, and how does that motivation connect with the way you want to show {focus_label.lower()} in your work?",
+            "question_type": "conceptual",
+            "expected_points": [
+                "genuine motivation",
+                "role alignment",
+                "career intent",
+                "specific example or reasoning",
+            ],
+            "evaluation_focus": ["motivation", "authenticity", focus_label],
+            "topic_tag": focus_label,
+        }
+
+    if phase == "situational":
+        situational_prompts = {
+            "communication": "Imagine you have to explain a delay or mistake to your manager and team. What would you say, and how would you handle the conversation?",
+            "leadership": "Imagine a team member is stuck and the deadline is very close. What would you do to move the work forward without losing trust?",
+            "problem-solving": "Imagine your deadline is tomorrow but a key task is still incomplete. What would you do, and why?",
+            "teamwork": "Imagine one team member is not contributing and the project is falling behind. How would you handle it?",
+            "confidence": "Imagine you are asked an unexpected question in an important meeting or interview. How would you respond while staying confident?",
+        }
+        return {
+            "assistant_reply": assistant_reply,
+            "question": situational_prompts.get(focus_label.lower(), "Imagine your deadline is tomorrow but a key task is still incomplete. What would you do, and why?"),
+            "question_type": "scenario",
+            "expected_points": [
+                "honest situation assessment",
+                "prioritization and communication",
+                "ownership of next steps",
+                "practical outcome or mitigation",
+            ],
+            "evaluation_focus": ["decision making", "responsibility", focus_label],
+            "topic_tag": focus_label,
+        }
+
+    if phase == "communication":
+        return {
+            "assistant_reply": assistant_reply,
+            "question": "How do you handle criticism or disagreement while still keeping the conversation professional and productive?",
+            "question_type": "behavioral",
+            "expected_points": [
+                "calm response to feedback",
+                "active listening",
+                "respectful communication",
+                "growth mindset or result",
+            ],
+            "evaluation_focus": ["communication", "maturity", focus_label],
+            "topic_tag": focus_label,
+        }
+
+    if phase == "closing":
+        return {
+            "assistant_reply": "Thank you. Before we wrap up, I have one final question.",
+            "question": "Do you have any questions for me, and what would you ask if this were a real interview?",
+            "question_type": "conceptual",
+            "expected_points": [
+                "thoughtful question",
+                "interest in role or team",
+                "professional tone",
+            ],
+            "evaluation_focus": ["curiosity", "professionalism", "clarity"],
+            "topic_tag": "closing",
+        }
+
+    focus_prompts = {
+        "communication": "Tell me about a time you had to explain a difficult idea, handle feedback, or de-escalate a tense conversation. What happened and what was the outcome?",
+        "leadership": "Tell me about a time you took initiative or led others through a difficult situation. What did you do, and what changed because of it?",
+        "problem-solving": "Tell me about a difficult problem or setback you faced. How did you approach it, and what was the result?",
+        "teamwork": "Tell me about a time you had to work closely with a team under pressure. What was your role, and how did the situation end?",
+        "confidence": "Tell me about a time you had to stay calm and confident in an uncertain or high-pressure situation. What did you do?",
+    }
+    focus_key = focus.lower()
+    question_text = focus_prompts.get(
+        focus_key,
+        f"Tell me about a time you demonstrated {focus} in a meaningful situation. What was the context, what did you do, and what happened?",
+    )
+    return {
+        "assistant_reply": assistant_reply,
+        "question": question_text,
+        "question_type": "behavioral",
+        "expected_points": [
+            "clear situation",
+            "specific action taken",
+            "result or learning",
+            "role ownership",
+        ],
+        "evaluation_focus": ["STAR structure", "specificity", focus_label],
+        "topic_tag": focus_label,
+    }
+
+
+async def _generate_hr_adaptive_question(
+    session: Dict[str, Any],
+    last_question: Optional[Dict[str, Any]],
+    answer_text: str,
+    evaluation: Optional[Dict[str, Any]],
+) -> Tuple[Dict[str, Any], str]:
+    state = session.get("meta", {}).get("adaptive_state") or {}
+    variation = session.get("meta", {}).get("interview_variation") or {}
+    desired_phase = _next_hr_phase(state)
+    desired_focus = _next_hr_focus(state, last_question)
+    last_score = int((evaluation or {}).get("score") or 0)
+    prompt = f"""
+You are running a live adaptive HR interview one question at a time.
+
+Interview context:
+{_context_summary(session.get("context", {}))}
+
+Current HR interview state:
+{_adaptive_state_summary(state)}
+
+Recent turn:
+- Previous question: {(last_question or {}).get("question") or "None"}
+- Previous topic: {(last_question or {}).get("topic_tag") or "None"}
+- Candidate answer: {answer_text or "No answer captured"}
+- Last score: {last_score}
+- Last feedback: {(evaluation or {}).get("feedback") or "Not available"}
+- Last gaps: {json.dumps((evaluation or {}).get("gaps") or [], ensure_ascii=False)}
+
+Desired next phase: {desired_phase}
+Desired focus area: {desired_focus}
+Session variation:
+{_variation_summary(variation)}
+
+Return valid JSON with this exact shape:
+{{
+  "assistant_reply": "one short conversational bridge",
+  "question": "exactly one next HR question",
+  "question_type": "introduction | conceptual | behavioral | scenario",
+  "expected_points": ["3 to 5 concise expected answer points"],
+  "evaluation_focus": ["3 concise evaluation criteria"],
+  "topic_tag": "short topic label"
+}}
+
+Rules:
+- Ask exactly one question.
+- Sound human, calm, supportive, and realistic.
+- Use the role, experience level, round mode, focus areas, desired focus area, and previous answer.
+- Keep the selected focus areas balanced across the interview instead of drifting into only one area.
+- If the last answer was vague or scored below 55, ask a simpler follow-up or request specifics before moving on too quickly.
+- If the last answer was strong or scored 80+, you may go deeper or make the next question more challenging.
+- For behavioral questions, encourage STAR structure.
+- For situational questions, test judgment, responsibility, and communication.
+- For the closing phase, ask if the candidate has any questions for the interviewer.
+- Avoid markdown.
+"""
+
+    try:
+        generated, provider = await _generate_json_with_fallback(
+            prompt,
+            ["gemini", "ollama"],
+            0.25,
+            LIVE_AI_TIMEOUT_SECONDS,
+        )
+        question = {
+            "assistant_reply": _normalize_text(generated.get("assistant_reply") or ""),
+            "question": _normalize_text(generated.get("question") or ""),
+            "question_type": _safe_question_type(generated.get("question_type") or "behavioral"),
+            "expected_points": _safe_list(generated.get("expected_points"))[:5],
+            "evaluation_focus": _safe_list(generated.get("evaluation_focus"))[:4],
+            "topic_tag": _normalize_text(generated.get("topic_tag") or _next_hr_focus(state, last_question)),
+        }
+        if not question["question"] or not question["expected_points"]:
+            raise ProviderError("HR adaptive question generation returned incomplete data.")
+        return question, provider
+    except ProviderError:
+        return _fallback_hr_adaptive_question(session, last_question, evaluation), "fallback"
+
+
+async def _create_hr_adaptive_interview_session(
+    payload: Dict[str, Any],
+    question_count: int,
+    difficulty: str,
+    role_blueprint: Dict[str, Any],
+    blueprint_provider: str,
+    variation: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    session_id = str(uuid.uuid4())
+    variation = variation or _build_interview_variation(payload)
+    adaptive_state = _build_hr_adaptive_state(payload, question_count)
+    opening_turn, opening_provider = await _generate_hr_opening_turn(payload, question_count, variation)
+    provider_meta = {
+        "generation_provider": opening_provider,
+        "evaluation_provider": "",
+        "analysis_provider": blueprint_provider,
+    }
+
+    session = {
+        "session_id": session_id,
+        "created_at": time.time(),
+        "context": payload,
+        "assistant_intro": opening_turn["assistant_intro"],
+        "questions": [],
+        "answers": [],
+        "evaluations": [],
+        "providers": provider_meta,
+        "meta": {
+            "difficulty": difficulty,
+            "config_mode": payload.get("config_mode") or "question",
+            "practice_type": payload.get("practice_type") or "practice",
+            "interview_mode_time": payload.get("interview_mode_time"),
+            "time_mode_interval": payload.get("time_mode_interval"),
+            "selected_mode": payload.get("selected_mode"),
+            "role_blueprint": role_blueprint,
+            "adaptive_state": adaptive_state,
+            "interview_variation": variation,
+        },
+        "question_outline": [],
+        "saved_report_user_ids": [],
+    }
+
+    first_question = _append_session_question(
+        session,
+        {
+            "question": opening_turn["question"],
+            "question_type": opening_turn["question_type"],
+            "expected_points": opening_turn["expected_points"],
+            "evaluation_focus": opening_turn["evaluation_focus"],
+            "count_towards_score": True,
+            "topic_tag": opening_turn["topic_tag"],
+        },
+    )
+
+    INTERVIEW_SESSIONS[session_id] = session
+    await _persist_session(session)
+    return {
+        "session_id": session_id,
+        "assistant_intro": session["assistant_intro"],
+        "total_questions": question_count,
+        "current_question": first_question["question"],
+        "current_question_type": first_question["question_type"],
+        "providers": provider_meta,
+        "meta": session["meta"],
+        "question_outline": session["question_outline"],
+    }
+
+
+async def _evaluate_hr_adaptive_interview_answer(
+    session: Dict[str, Any],
+    question_index: int,
+    question: Dict[str, Any],
+    answer_text: str,
+) -> Dict[str, Any]:
+    state = session.get("meta", {}).get("adaptive_state") or {}
+    context_summary = _context_summary(session["context"])
+    expected_points = question.get("expected_points") or []
+    evaluation_focus = question.get("evaluation_focus") or []
+    prompt = f"""
+You are evaluating a spoken HR interview answer.
+
+Interview context:
+{context_summary}
+
+Current HR interview state:
+{_adaptive_state_summary(state)}
+
+Question:
+{question["question"]}
+
+Expected answer points:
+{json.dumps(expected_points, ensure_ascii=False)}
+
+Evaluation focus:
+{json.dumps(evaluation_focus, ensure_ascii=False)}
+
+Candidate answer:
+{answer_text}
+
+Return valid JSON:
+{{
+  "score": 0,
+  "feedback": "2 to 4 sentence evaluation",
+  "relevance": "Relevant | Partially Relevant | Not Relevant",
+  "correctness": "Correct | Partially Correct | Incorrect",
+  "clarity": "Clear | Needs Improvement",
+  "technical_depth": "Good | Moderate | Weak",
+  "logical_validity": "Logical | Partially Logical | Illogical",
+  "real_world_applicability": "Applicable | Partially Applicable | Not Applicable",
+  "strengths": ["up to 3 concise strengths"],
+  "gaps": ["up to 3 concise gaps"],
+  "matched_points": ["expected points that were covered"],
+  "missed_points": ["expected points that were not covered"],
+  "suggestions": ["up to 3 concise ways to improve"],
+  "suggested_answer": "short improved answer guidance",
+  "assistant_reply": "one short warm spoken response before the next question",
+  "communication_score": 0,
+  "confidence_score": 0,
+  "problem_solving_score": 0,
+  "teamwork_score": 0,
+  "leadership_score": 0,
+  "hr_readiness_score": 0,
+  "personality_attitude_score": 0,
+  "cultural_fit_score": 0,
+  "star_score": 0
+}}
+
+Rules:
+- Evaluate approximately, not by exact wording.
+- Reward honest, structured, relevant answers even if phrasing is imperfect.
+- Check clarity, structure, confidence, examples, and outcome.
+- For behavioral answers, reward STAR-like structure.
+- If the answer is vague, ask for specifics in the feedback or assistant reply.
+- If the answer is strong, say what made it effective.
+- Avoid markdown.
+"""
+
+    provider_used = session["providers"].get("evaluation_provider", "fallback")
+    try:
+        evaluation, provider_used = await _generate_json_with_fallback(
+            prompt,
+            ["gemini", "ollama"],
+            0.2,
+            LIVE_AI_TIMEOUT_SECONDS,
+        )
+    except ProviderError:
+        evaluation = _hr_heuristic_evaluation(question, answer_text)
+        provider_used = "fallback"
+
+    session["providers"]["evaluation_provider"] = provider_used
+    if provider_used != "fallback":
+        heuristic_defaults = _hr_heuristic_evaluation(question, answer_text)
+        evaluation = _normalize_hr_evaluation_payload(evaluation, heuristic_defaults)
+
+    _register_scored_turn(state, question)
+    if int(state.get("scored_questions_answered", 0)) >= int(state.get("scored_question_target", 0)):
+        return _record_turn_result(
+            session,
+            question_index,
+            question,
+            answer_text,
+            evaluation,
+            provider_used,
+            next_question=None,
+            is_complete=True,
+        )
+
+    if provider_used == "fallback":
+        generated_question, provider = _fallback_hr_adaptive_question(session, question, evaluation), "fallback"
+    else:
+        generated_question, provider = await _generate_hr_adaptive_question(session, question, answer_text, evaluation)
+    session["providers"]["generation_provider"] = provider
+    evaluation["assistant_reply"] = _normalize_text(
+        generated_question.get("assistant_reply") or evaluation.get("assistant_reply") or "Thanks. Let us continue."
+    )
+    next_question = _append_session_question(
+        session,
+        {
+            **generated_question,
+            "count_towards_score": True,
+        },
+    )
+
+    return _record_turn_result(
+        session,
+        question_index,
+        question,
+        answer_text,
+        evaluation,
+        provider_used,
+        next_question=next_question,
+        is_complete=False,
+    )
 
 
 async def _evaluate_adaptive_interview_answer(
@@ -2176,17 +3643,24 @@ Return valid JSON:
   "missed_points": ["expected points that were not covered"],
   "suggestions": ["up to 3 concise ways to improve"],
   "suggested_answer": "short improved answer guidance",
-  "assistant_reply": "one short warm spoken response before the next question"
+  "assistant_reply": "one short warm spoken micro-feedback response before the next question",
+  "communication_score": 0,
+  "confidence_score": 0,
+  "problem_solving_score": 0
 }}
 
 Rules:
 - Evaluate approximately, not by exact wording.
 - Reward relevant meaning even if phrasing is imperfect.
 - Be practical and interview-focused.
+- Keep the feedback grounded in how a real interviewer would react.
 - If the answer is off-topic, say so gently and redirect to the topic.
 - If the answer is vague, ask for more specificity.
 - If the answer is too short, ask the candidate to expand on it.
 - If the answer contains incorrect assumptions, correct them briefly but politely.
+- If the question was a structured thinking prompt, pay special attention to step-by-step reasoning, data structure choice, and complexity awareness.
+- If the question was a real-world scenario, pay special attention to debugging mindset, prioritization, and trade-offs.
+- assistant_reply should sound like micro-feedback during the interview: briefly acknowledge what went well and, if needed, mention one improvement point before moving on.
 - Do not use markdown.
 """
 
@@ -2209,6 +3683,7 @@ Rules:
 
     _register_scored_turn(state, question)
     if int(state.get("scored_questions_answered", 0)) >= int(state.get("scored_question_target", 0)):
+        evaluation["assistant_reply"] = _adaptive_closing_message(session, question, evaluation)
         return _record_turn_result(
             session,
             question_index,
@@ -2258,6 +3733,16 @@ async def create_interview_session(payload: Dict[str, Any]) -> Dict[str, Any]:
     difficulty = _difficulty_from_experience(payload.get("experience") or "")
     target_subject = payload.get("primary_language") if payload.get("selected_mode") == "language" else payload.get("job_role")
     target_subject = target_subject or payload.get("job_role") or payload.get("primary_language") or "the selected interview focus"
+    if _hr_adaptive_interview_enabled(payload):
+        role_blueprint, blueprint_provider = await _infer_role_blueprint(payload)
+        return await _create_hr_adaptive_interview_session(
+            payload,
+            question_count,
+            difficulty,
+            role_blueprint,
+            blueprint_provider,
+            interview_variation,
+        )
     if _adaptive_role_interview_enabled(payload):
         role_blueprint, blueprint_provider = await _infer_role_blueprint(payload)
         return await _create_adaptive_interview_session(
@@ -2439,13 +3924,89 @@ async def evaluate_interview_answer(
 
     question = questions[question_index]
     answer_text = _normalize_text(answer)
-    if session.get("meta", {}).get("adaptive_state", {}).get("enabled"):
-        result = await _evaluate_adaptive_interview_answer(
+    session_meta = session.setdefault("meta", {})
+    if session_meta.get("pending_end_confirmation"):
+        confirmation_reply = _detect_confirmation_reply(answer_text)
+        if confirmation_reply == "yes":
+            session_meta.pop("pending_end_confirmation", None)
+            await _persist_session(session)
+            return _build_control_turn_response(
+                session,
+                question_index,
+                question,
+                "end_confirmed",
+                assistant_reply="Understood. I will end the interview here and prepare your report.",
+                next_question="",
+                next_question_type=_normalize_text(question.get("question_type") or "practical"),
+                answer_text=answer_text,
+                should_end_interview=True,
+            )
+        if confirmation_reply == "no":
+            session_meta.pop("pending_end_confirmation", None)
+            await _persist_session(session)
+            return _build_control_turn_response(
+                session,
+                question_index,
+                question,
+                "end_cancelled",
+                assistant_reply="Alright, we will continue. Here is the current question again.",
+                next_question=_normalize_text(question.get("question") or ""),
+                next_question_type=_normalize_text(question.get("question_type") or "practical"),
+                answer_text=answer_text,
+            )
+        return _build_control_turn_response(
             session,
             question_index,
             question,
-            answer_text,
+            "end_confirm",
+            assistant_reply="I just need a quick confirmation. Please say yes to end the interview or no to continue.",
+            next_question="",
+            next_question_type=_normalize_text(question.get("question_type") or "practical"),
+            answer_text=answer_text,
         )
+
+    if _detect_end_interview_request(answer_text):
+        session_meta["pending_end_confirmation"] = {
+            "question_index": question_index,
+            "requested_at": time.time(),
+        }
+        await _persist_session(session)
+        return _build_control_turn_response(
+            session,
+            question_index,
+            question,
+            "end_confirm",
+            assistant_reply=(
+                "I heard that you want to end the interview. "
+                "Are you sure you want to end it? Please say yes to end the interview or no to continue."
+            ),
+            next_question="",
+            next_question_type=_normalize_text(question.get("question_type") or "practical"),
+            answer_text=answer_text,
+        )
+
+    control_command = _detect_interview_control_command(answer_text)
+    if control_command:
+        return _build_control_turn_response(session, question_index, question, control_command)
+    off_topic_kind = _detect_off_topic_small_talk(answer_text)
+    if off_topic_kind:
+        return _build_off_topic_control_response(session, question_index, question, answer_text, off_topic_kind)
+    adaptive_state = session.get("meta", {}).get("adaptive_state", {}) or {}
+    if adaptive_state.get("enabled"):
+        if _normalize_text(adaptive_state.get("mode") or "").lower() == "hr":
+            result = await _evaluate_hr_adaptive_interview_answer(
+                session,
+                question_index,
+                question,
+                answer_text,
+            )
+        else:
+            result = await _evaluate_adaptive_interview_answer(
+                session,
+                question_index,
+                question,
+                answer_text,
+            )
         await _persist_session(session)
         return result
 
@@ -2540,6 +4101,15 @@ Rules:
         "real_world_applicability": evaluation["real_world_applicability"],
         "suggestions": evaluation["suggestions"][:3],
         "provider": provider_used,
+        "communication_score": _normalize_score_value(evaluation.get("communication_score")),
+        "confidence_score": _normalize_score_value(evaluation.get("confidence_score")),
+        "problem_solving_score": _normalize_score_value(evaluation.get("problem_solving_score")),
+        "teamwork_score": _normalize_score_value(evaluation.get("teamwork_score")),
+        "leadership_score": _normalize_score_value(evaluation.get("leadership_score")),
+        "hr_readiness_score": _normalize_score_value(evaluation.get("hr_readiness_score")),
+        "personality_attitude_score": _normalize_score_value(evaluation.get("personality_attitude_score")),
+        "cultural_fit_score": _normalize_score_value(evaluation.get("cultural_fit_score")),
+        "star_score": _normalize_score_value(evaluation.get("star_score")),
     }
 
     answers = session["answers"]
@@ -2574,6 +4144,33 @@ Rules:
     }
 
 
+def _average_metric(evaluations: List[Dict[str, Any]], key: str) -> Optional[int]:
+    values: List[int] = []
+    for item in evaluations:
+        score = _normalize_score_value(item.get(key))
+        if score is not None:
+            values.append(score)
+    if not values:
+        return None
+    return int(round(sum(values) / len(values)))
+
+
+def _build_hr_score_breakdown(session: Dict[str, Any]) -> Optional[Dict[str, int]]:
+    evaluations = _scored_evaluations(session)
+    breakdown = {
+        "communication": _average_metric(evaluations, "communication_score"),
+        "confidence": _average_metric(evaluations, "confidence_score"),
+        "problem_solving": _average_metric(evaluations, "problem_solving_score"),
+        "teamwork": _average_metric(evaluations, "teamwork_score"),
+        "leadership": _average_metric(evaluations, "leadership_score"),
+        "hr_readiness": _average_metric(evaluations, "hr_readiness_score"),
+        "personality_attitude": _average_metric(evaluations, "personality_attitude_score"),
+        "cultural_fit": _average_metric(evaluations, "cultural_fit_score"),
+        "star_structure": _average_metric(evaluations, "star_score"),
+    }
+    return {key: value for key, value in breakdown.items() if value is not None} or None
+
+
 def _fallback_summary(session: Dict[str, Any]) -> Dict[str, Any]:
     evaluations = _scored_evaluations(session)
     if evaluations:
@@ -2591,6 +4188,29 @@ def _fallback_summary(session: Dict[str, Any]) -> Dict[str, Any]:
         for item in evaluations
         if item["score"] < 60
     ][:3]
+
+    if _normalize_text(session.get("context", {}).get("category") or "").lower() == "hr":
+        score_breakdown = _build_hr_score_breakdown(session)
+        return {
+            "overall_score": average_score,
+            "summary": (
+                "You completed the HR interview. Keep strengthening structure, specific examples, and measurable outcomes "
+                "so your communication sounds more interview-ready."
+            ),
+            "top_strengths": [
+                "You completed the full HR interview flow with spoken responses.",
+                "You gave relevant examples tied to your experience and role direction.",
+                "You showed willingness to explain decisions, teamwork, and outcomes.",
+            ],
+            "improvement_areas": [
+                "Use clearer STAR structure in behavioral answers.",
+                "Add stronger outcomes, numbers, or lessons learned.",
+                "Keep answers specific instead of generic or overly broad.",
+            ],
+            "strongest_questions": strong_answers,
+            "needs_work_questions": weak_answers,
+            "score_breakdown": score_breakdown,
+        }
 
     return {
         "overall_score": average_score,
@@ -2617,6 +4237,7 @@ async def complete_interview_session(session_id: str, ended_early: bool = False)
     session = await _get_session(session_id)
     if not session:
         raise ProviderError("Interview session not found.")
+    is_hr_session = _normalize_text(session.get("context", {}).get("category") or "").lower() == "hr"
 
     if _is_session_completed(session):
         cached_summary = dict(session.get("summary") or {})
@@ -2691,6 +4312,10 @@ Return valid JSON:
             "strongest_questions": _safe_list(summary.get("strongest_questions")) or fallback["strongest_questions"],
             "needs_work_questions": _safe_list(summary.get("needs_work_questions")) or fallback["needs_work_questions"],
         }
+        if is_hr_session:
+            summary["score_breakdown"] = fallback.get("score_breakdown") or _build_hr_score_breakdown(session)
+    elif is_hr_session and "score_breakdown" not in summary:
+        summary["score_breakdown"] = _build_hr_score_breakdown(session)
 
     session["summary"] = summary
     session["ended_early"] = bool(ended_early)

@@ -16,6 +16,8 @@ const API_BASE_URL = process.env.REACT_APP_API_URL || "http://127.0.0.1:8000";
 
 function buildPayload(context) {
   const selectedOptions = Array.isArray(context.selectedOptions) ? context.selectedOptions.filter(Boolean) : [];
+  const focusAreas = Array.isArray(context.focusAreas) ? context.focusAreas.filter(Boolean) : [];
+  const effectiveOptions = focusAreas.length ? focusAreas : selectedOptions;
   const selectedMode = context.selectedMode || context.stage || "";
 
   return {
@@ -27,15 +29,121 @@ function buildPayload(context) {
       context.primary_language ||
       (selectedMode === "language" ? selectedOptions[0] : "") ||
       "",
-    selected_options: selectedOptions,
+    selected_options: effectiveOptions,
+    focus_areas: effectiveOptions,
+    hr_round: context.hrRound || "",
     experience: context.experience || "Not specified",
     config_mode: context.configMode || "standard",
-    question_count: context.customQuestionCount || context.questionCount || 5,
+    question_count: context.customQuestionCount || context.questionCount || 10,
     practice_type: context.practiceType || "voice interview",
     interview_mode_time: context.interviewModeTime || null,
     time_mode_interval: context.timeModeInterval || null,
     resume_text: context.resumeText || "",
   };
+}
+
+function formatRoundLabel(value) {
+  const normalized = safeText(value);
+  if (!normalized) return "";
+  return normalized.replace(/_/g, " / ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function detectInterviewControlCommand(value) {
+  const normalized = clean(value).toLowerCase();
+  if (!normalized) return null;
+  const wordCount = normalized.split(" ").filter(Boolean).length;
+  if (wordCount > 8) return null;
+
+  const repeatPatterns = [
+    /^repeat$/,
+    /^repeat again$/,
+    /^repeat question$/,
+    /^repeat the question$/,
+    /^say again$/,
+    /^say that again$/,
+    /^say the question again$/,
+    /^can you repeat$/,
+    /^can you repeat the question$/,
+    /^please repeat$/,
+    /^please repeat the question$/,
+    /^one more time$/,
+    /^pardon$/,
+  ];
+
+  const clarifyPatterns = [
+    /^(i )?do not understand$/,
+    /^(i )?do not understand the question$/,
+    /^(i )?don't understand$/,
+    /^(i )?don't understand the question$/,
+    /^(i )?did not understand$/,
+    /^(i )?did not understand the question$/,
+    /^(i )?didn't understand$/,
+    /^(i )?didn't understand the question$/,
+    /^(i )?didnt understand$/,
+    /^(i )?didnt understand the question$/,
+    /^(i )?cannot understand$/,
+    /^(i )?cannot understand the question$/,
+    /^(i )?can't understand$/,
+    /^(i )?can't understand the question$/,
+    /^(i )?cant understand$/,
+    /^(i )?cant understand the question$/,
+    /^can you explain$/,
+    /^can you explain the question$/,
+    /^could you explain$/,
+    /^could you explain the question$/,
+    /^please explain$/,
+    /^please explain the question$/,
+    /^clarify$/,
+    /^clarify the question$/,
+    /^simplify$/,
+    /^simplify the question$/,
+    /^make it simpler$/,
+    /^what do you mean$/,
+  ];
+
+  if (repeatPatterns.some((pattern) => pattern.test(normalized))) return "repeat";
+  if (clarifyPatterns.some((pattern) => pattern.test(normalized))) return "clarify";
+  return null;
+}
+
+function buildQuestionClarification(questionText) {
+  const normalized = safeText(questionText).toLowerCase();
+  if (!normalized) {
+    return "Sure. Let me make that simpler, then I will repeat the same question.";
+  }
+  if (/tell me about a time|describe a time|walk me through/.test(normalized)) {
+    return "Sure. This is asking for a real example. Briefly explain the situation, what you did, and the result. I will repeat the same question.";
+  }
+  if (/what would you do|imagine|how would you handle/.test(normalized)) {
+    return "Sure. This is a situational question. Explain what you would do first, how you would communicate, and why. I will repeat the same question.";
+  }
+  return "Sure. Answer directly, keep it structured, and add one clear example or outcome where possible. I will repeat the same question.";
+}
+
+function controlTurnStatus(command) {
+  switch (safeText(command)) {
+    case "repeat":
+      return "Repeating the current question...";
+    case "clarify":
+      return "Clarifying the current question...";
+    case "off_topic":
+      return "Refocusing on the current question...";
+    case "end_confirm":
+      return "Confirming whether to end the interview...";
+    case "end_cancelled":
+      return "Continuing the interview...";
+    case "end_confirmed":
+      return "Ending the interview...";
+    default:
+      return "Continuing the interview...";
+  }
+}
+
+function controlTurnPrompt(command, questionNumber, questionText) {
+  if (["end_confirm", "end_confirmed"].includes(safeText(command))) {
+    return "";
+  }
+  return `Question ${questionNumber}. ${safeText(questionText) || "Please continue."}`;
 }
 
 function VoiceInterviewPage() {
@@ -123,6 +231,7 @@ function VoiceInterviewPage() {
   const isCompactLayout = viewportWidth < 1180;
   const transcript = clean(`${draft} ${interim}`);
   const title = safeText(payload.job_role || payload.primary_language || payload.category || "Interview");
+  const selectionFocus = safeText(payload.focus_areas || payload.selected_options) || "General interview preparation";
 
   const buildLocalFallbackReport = useCallback((endedEarly = false) => {
     const evaluations = history.map((item) => normalizeEvaluation(item));
@@ -355,7 +464,9 @@ function VoiceInterviewPage() {
     if (preface) {
       await speak(preface);
     }
-    await speak(promptText);
+    if (promptText) {
+      await speak(promptText);
+    }
     if (SpeechRecognition) {
       startListening();
     } else {
@@ -437,6 +548,23 @@ function VoiceInterviewPage() {
       return;
     }
 
+    const controlCommand = detectInterviewControlCommand(answer);
+    if (controlCommand) {
+      stopListening();
+      setDraft("");
+      setInterim("");
+      setError("");
+      setStatus(controlCommand === "repeat" ? "Repeating the current question..." : "Clarifying the current question...");
+      await askQuestion({
+        preface:
+          controlCommand === "repeat"
+            ? "Sure. I will repeat the same question."
+            : buildQuestionClarification(question),
+        promptText: `Question ${indexRef.current + 1}. ${safeText(question) || "Please continue."}`,
+      });
+      return;
+    }
+
     stopListening();
     setBusy(true);
     setStatus("Evaluating your answer...");
@@ -454,16 +582,40 @@ function VoiceInterviewPage() {
         next_question: safeText(response.data?.next_question),
         is_complete: Boolean(response.data?.is_complete),
       };
+      const isControlTurn = Boolean(response.data?.is_control_turn);
+      const shouldEndInterview = Boolean(response.data?.should_end_interview);
 
-      setLatestEval(normalized);
-      setHistory((prev) => [...prev, normalized]);
       setProviders((prev) => ({
         ...prev,
-        evaluation_provider: normalized.provider || prev.evaluation_provider,
+        ...(response.data?.providers || {}),
+        evaluation_provider: isControlTurn ? prev.evaluation_provider : normalized.provider || prev.evaluation_provider,
       }));
 
       setDraft("");
       setInterim("");
+
+      if (isControlTurn) {
+        setStatus(controlTurnStatus(normalized.control_command));
+        if (shouldEndInterview) {
+          await finishInterview({
+            endedEarly: true,
+            spokenClose: safeText(normalized.assistant_reply) || "Thank you. This interview is over. I am preparing your report.",
+          });
+          return;
+        }
+        await askQuestion({
+          preface: safeText(normalized.assistant_reply) || "Sure. I will repeat the same question.",
+          promptText: controlTurnPrompt(
+            normalized.control_command,
+            indexRef.current + 1,
+            normalized.next_question || safeText(question) || "Please continue."
+          ),
+        });
+        return;
+      }
+
+      setLatestEval(normalized);
+      setHistory((prev) => [...prev, normalized]);
 
       if (normalized.is_complete) {
         await finishInterview({
@@ -703,11 +855,13 @@ function VoiceInterviewPage() {
                 <div>Mode: {safeText(payload.selected_mode)}</div>
                 <div>Role: {safeText(payload.job_role) || "General"}</div>
                 <div>Language: {safeText(payload.primary_language) || "Not selected"}</div>
+                <div>Round: {formatRoundLabel(payload.hr_round) || "Standard"}</div>
                 <div>Experience: {safeText(payload.experience)}</div>
                 <div>Questions: {safeScore(payload.question_count)}</div>
                 <div>Config mode: {safeText(payload.config_mode)}</div>
                 <div>Timer: {resolveTimerMinutes() ? `${resolveTimerMinutes()} minutes` : "Off"}</div>
                 <div>Speech recognition: {SpeechRecognition ? "Automatic voice capture enabled" : "Unavailable, typed fallback enabled"}</div>
+                <div>Focus: {selectionFocus}</div>
               </div>
               <button className="mock-btn" onClick={beginVoiceInterview} disabled={busy} style={{ marginTop: 24, background: "linear-gradient(135deg, #4338ca, #7c3aed)" }}>
                 {busy ? "Starting..." : "Enter Fullscreen and Begin"}

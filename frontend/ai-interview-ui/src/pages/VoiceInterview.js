@@ -88,6 +88,110 @@ const formatProviderName = (provider, stage = "") => {
   return value.replace(/\b\w/g, (char) => char.toUpperCase());
 };
 
+const formatRoundLabel = (value) => {
+  const normalized = safeText(value);
+  if (!normalized) return "";
+  return normalized.replace(/_/g, " / ").replace(/\b\w/g, (char) => char.toUpperCase());
+};
+
+const detectInterviewControlCommand = (value) => {
+  const normalized = clean(value).toLowerCase();
+  if (!normalized) return null;
+  const wordCount = normalized.split(" ").filter(Boolean).length;
+  if (wordCount > 8) return null;
+
+  const repeatPatterns = [
+    /^repeat$/,
+    /^repeat again$/,
+    /^repeat question$/,
+    /^repeat the question$/,
+    /^say again$/,
+    /^say that again$/,
+    /^say the question again$/,
+    /^can you repeat$/,
+    /^can you repeat the question$/,
+    /^please repeat$/,
+    /^please repeat the question$/,
+    /^one more time$/,
+    /^pardon$/,
+  ];
+
+  const clarifyPatterns = [
+    /^(i )?do not understand$/,
+    /^(i )?do not understand the question$/,
+    /^(i )?don't understand$/,
+    /^(i )?don't understand the question$/,
+    /^(i )?did not understand$/,
+    /^(i )?did not understand the question$/,
+    /^(i )?didn't understand$/,
+    /^(i )?didn't understand the question$/,
+    /^(i )?didnt understand$/,
+    /^(i )?didnt understand the question$/,
+    /^(i )?cannot understand$/,
+    /^(i )?cannot understand the question$/,
+    /^(i )?can't understand$/,
+    /^(i )?can't understand the question$/,
+    /^(i )?cant understand$/,
+    /^(i )?cant understand the question$/,
+    /^can you explain$/,
+    /^can you explain the question$/,
+    /^could you explain$/,
+    /^could you explain the question$/,
+    /^please explain$/,
+    /^please explain the question$/,
+    /^clarify$/,
+    /^clarify the question$/,
+    /^simplify$/,
+    /^simplify the question$/,
+    /^make it simpler$/,
+    /^what do you mean$/,
+  ];
+
+  if (repeatPatterns.some((pattern) => pattern.test(normalized))) return "repeat";
+  if (clarifyPatterns.some((pattern) => pattern.test(normalized))) return "clarify";
+  return null;
+};
+
+const buildQuestionClarification = (questionText) => {
+  const normalized = safeText(questionText).toLowerCase();
+  if (!normalized) {
+    return "Sure. Let me make that simpler, then I will repeat the same question.";
+  }
+  if (/tell me about a time|describe a time|walk me through/.test(normalized)) {
+    return "Sure. This is asking for a real example. Briefly explain the situation, what you did, and the result. I will repeat the same question.";
+  }
+  if (/what would you do|imagine|how would you handle/.test(normalized)) {
+    return "Sure. This is a situational question. Explain what you would do first, how you would communicate, and why. I will repeat the same question.";
+  }
+  return "Sure. Answer directly, keep it structured, and add one clear example or outcome where possible. I will repeat the same question.";
+};
+
+const controlTurnStatus = (command) => {
+  switch (safeText(command)) {
+    case "repeat":
+      return "Repeating the current question...";
+    case "clarify":
+      return "Clarifying the current question...";
+    case "off_topic":
+      return "Refocusing on the current question...";
+    case "end_confirm":
+      return "Confirming whether to end the interview...";
+    case "end_cancelled":
+      return "Continuing the interview...";
+    case "end_confirmed":
+      return "Ending the interview...";
+    default:
+      return "Continuing the interview...";
+  }
+};
+
+const controlTurnPrompt = (command, questionNumber, questionText) => {
+  if (["end_confirm", "end_confirmed"].includes(safeText(command))) {
+    return "";
+  }
+  return `Question ${questionNumber}. ${safeText(questionText) || "Please continue."}`;
+};
+
 const preferredVoiceHints = [
   "google uk english female",
   "microsoft aria",
@@ -149,6 +253,8 @@ const normalizeEvaluation = (item) => ({
   suggestions: safeTextList(item?.suggestions),
   score: safeScore(item?.score),
   count_towards_score: item?.count_towards_score !== false,
+  is_control_turn: Boolean(item?.is_control_turn),
+  control_command: safeText(item?.control_command),
 });
 
 function MetricTile({ label, value, tone = "#4338ca" }) {
@@ -190,6 +296,8 @@ function ScoreBars({ items = [] }) {
 
 function buildPayload(context) {
   const selectedOptions = Array.isArray(context.selectedOptions) ? context.selectedOptions.filter(Boolean) : [];
+  const focusAreas = Array.isArray(context.focusAreas) ? context.focusAreas.filter(Boolean) : [];
+  const effectiveOptions = focusAreas.length ? focusAreas : selectedOptions;
   const selectedMode = context.selectedMode || context.stage || "";
 
   return {
@@ -201,10 +309,12 @@ function buildPayload(context) {
       context.primary_language ||
       (selectedMode === "language" ? selectedOptions[0] : "") ||
       "",
-    selected_options: selectedOptions,
+    selected_options: effectiveOptions,
+    focus_areas: effectiveOptions,
+    hr_round: context.hrRound || "",
     experience: context.experience || "Not specified",
     config_mode: context.configMode || "standard",
-    question_count: context.customQuestionCount || context.questionCount || 5,
+    question_count: context.customQuestionCount || context.questionCount || 10,
     practice_type: context.practiceType || "voice interview",
     interview_mode_time: context.interviewModeTime || null,
     time_mode_interval: context.timeModeInterval || null,
@@ -1014,6 +1124,23 @@ function VoiceInterview() {
     const answer = clean(`${draftRef.current} ${interimRef.current}`);
     if (!answer || !sessionIdRef.current || busyRef.current || summaryRef.current || finalizingRef.current) return;
 
+    const controlCommand = detectInterviewControlCommand(answer);
+    if (controlCommand) {
+      stopListening();
+      setDraft("");
+      setInterim("");
+      setError("");
+      setStatus(controlCommand === "repeat" ? "Repeating the current question..." : "Clarifying the current question...");
+      await runVoiceTurn({
+        preface:
+          controlCommand === "repeat"
+            ? "Sure. I will repeat the same question."
+            : buildQuestionClarification(questionRef.current),
+        prompt: `Question ${indexRef.current + 1}. ${safeText(questionRef.current) || "Please continue."}`,
+      });
+      return;
+    }
+
     stopListening();
     setBusy(true);
     setStatus("Evaluating your answer...");
@@ -1050,23 +1177,46 @@ function VoiceInterview() {
         ...normalizeEvaluation(response.data),
         next_question: safeText(response.data?.next_question),
       };
+      const isControlTurn = Boolean(response.data?.is_control_turn);
+      const shouldEndInterview = Boolean(response.data?.should_end_interview);
       const progressCurrent = Number(response.data?.progress?.current);
       const progressTotal = Number(response.data?.progress?.total);
-      setLatestEval(result);
-      setHistory((prev) => [...prev, result]);
       setProviders((prev) => ({
         ...prev,
         ...(response.data?.providers || {}),
-        evaluation_provider: result.provider || prev.evaluation_provider,
+        evaluation_provider: isControlTurn ? prev.evaluation_provider : result.provider || prev.evaluation_provider,
       }));
       if (Number.isFinite(progressTotal) && progressTotal > 0) {
         setTotal(progressTotal);
       }
 
+      setDraft("");
+      setInterim("");
+
+      if (isControlTurn) {
+        setStatus(controlTurnStatus(result.control_command));
+        if (shouldEndInterview) {
+          await finalizeEarlyExitRef.current?.({
+            closingMessage: result.assistant_reply || EARLY_END_CLOSING_MESSAGE,
+          });
+          return;
+        }
+        await runVoiceTurn({
+          preface: result.assistant_reply || "Sure. I will repeat the same question.",
+          prompt: controlTurnPrompt(
+            result.control_command,
+            indexRef.current + 1,
+            result.next_question || safeText(questionRef.current) || "Please continue."
+          ),
+        });
+        return;
+      }
+
+      setLatestEval(result);
+      setHistory((prev) => [...prev, result]);
+
       if (result.is_complete) {
-        setDraft("");
-        setInterim("");
-        await speak(NATURAL_END_CLOSING_MESSAGE);
+        await speak(result.assistant_reply || NATURAL_END_CLOSING_MESSAGE);
         await finishInterview(sessionIdRef.current);
       } else {
         const nextIndex = Number.isFinite(progressCurrent) && progressCurrent >= 0
@@ -1074,8 +1224,6 @@ function VoiceInterview() {
           : indexRef.current + 1;
         setIndex(nextIndex);
         setQuestion(result.next_question || "");
-        setDraft("");
-        setInterim("");
         await runVoiceTurn({
           preface: result.assistant_reply || "Thank you. Let us continue.",
           prompt: `Question ${nextIndex + 1}. ${result.next_question || "Please continue."}`,
@@ -1427,6 +1575,16 @@ function VoiceInterview() {
       : `${Math.floor(timeLeftSeconds / 60)
           .toString()
           .padStart(2, "0")}:${(timeLeftSeconds % 60).toString().padStart(2, "0")}`;
+  const selectionFocus = safeText(payload.focus_areas || payload.selected_options) || "General interview preparation";
+  const hrBreakdown = summary?.score_breakdown && typeof summary.score_breakdown === "object"
+    ? Object.entries(summary.score_breakdown)
+        .filter(([, value]) => value != null)
+        .map(([key, value]) => ({
+          key,
+          label: key.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase()),
+          value: safeScore(value),
+        }))
+    : [];
 
   return (
     <div className="voice-ai-root" ref={rootRef}>
@@ -1482,12 +1640,13 @@ function VoiceInterview() {
                   <div className="voice-ai-selection-item"><strong>Mode:</strong> {safeText(payload.selected_mode)}</div>
                   <div className="voice-ai-selection-item"><strong>Role:</strong> {safeText(payload.job_role) || "General"}</div>
                   <div className="voice-ai-selection-item"><strong>Language:</strong> {safeText(payload.primary_language) || "Not selected"}</div>
+                  <div className="voice-ai-selection-item"><strong>Round:</strong> {formatRoundLabel(payload.hr_round) || "Standard"}</div>
                   <div className="voice-ai-selection-item"><strong>Experience:</strong> {safeText(payload.experience)}</div>
                   <div className="voice-ai-selection-item"><strong>Questions:</strong> {safeScore(payload.question_count)}</div>
                   <div className="voice-ai-selection-item"><strong>Config mode:</strong> {safeText(payload.config_mode)}</div>
                   <div className="voice-ai-selection-item"><strong>Timer:</strong> {resolveTimerMinutes() ? `${resolveTimerMinutes()} minutes` : "Off"}</div>
                   <div className="voice-ai-selection-item"><strong>Speech recognition:</strong> {SpeechRecognition ? "Automatic voice capture enabled" : "Unavailable, typed fallback enabled"}</div>
-                  <div className="voice-ai-selection-item"><strong>Focus:</strong> {safeText(payload.selected_options) || "General interview preparation"}</div>
+                  <div className="voice-ai-selection-item"><strong>Focus:</strong> {selectionFocus}</div>
                 </div>
               </div>
               <button className="mock-btn" onClick={beginVoiceInterview} disabled={busy} style={{ marginTop: 24, background: "linear-gradient(135deg, #4338ca, #7c3aed)" }}>
@@ -1551,7 +1710,7 @@ function VoiceInterview() {
                   <div className="voice-ai-hud-item"><span>Summary</span><strong>{formatProviderName(providers.summary_provider, "summary") || "Pending"}</strong></div>
                   <div className="voice-ai-hud-item"><span>Answers</span><strong>{history.length}</strong></div>
                   <div className="voice-ai-hud-item"><span>Listening</span><strong>{SpeechRecognition ? "Auto" : "Manual"}</strong></div>
-                  <div className="voice-ai-hud-item"><span>Focus</span><strong>{safeText(payload.selected_options) || "General"}</strong></div>
+                  <div className="voice-ai-hud-item"><span>Focus</span><strong>{selectionFocus}</strong></div>
                   <div className="voice-ai-hud-item"><span>Live state</span><strong>{livePhase}</strong></div>
                   <div className="voice-ai-hud-item"><span>Silence timer</span><strong>Off</strong></div>
                 </div>
@@ -1648,6 +1807,14 @@ function VoiceInterview() {
                     <MetricTile label="Coverage ratio" value={`${performanceRatio}%`} tone="#2563eb" />
                   </div>
 
+                  {hrBreakdown.length ? (
+                    <div style={{ display: "grid", gridTemplateColumns: isCompactLayout ? "1fr 1fr" : "repeat(5, minmax(0, 1fr))", gap: 14 }}>
+                      {hrBreakdown.map((item) => (
+                        <MetricTile key={item.key} label={item.label} value={`${item.value}/100`} tone="#7c3aed" />
+                      ))}
+                    </div>
+                  ) : null}
+
                   <div style={{ background: "white", borderRadius: 20, padding: 20, boxShadow: "0 14px 34px rgba(88,107,176,0.10)" }}>
                     <h4 style={{ marginTop: 0, color: "#0f172a" }}>User details and selections</h4>
                     <div style={{ display: "grid", gridTemplateColumns: isCompactLayout ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 12, color: "#334155" }}>
@@ -1657,6 +1824,8 @@ function VoiceInterview() {
                       <div>Mode: {safeText(summary.context?.selected_mode || payload.selected_mode)}</div>
                       <div>Role: {safeText(summary.context?.job_role || payload.job_role) || "Not selected"}</div>
                       <div>Language: {safeText(summary.context?.primary_language || payload.primary_language) || "Not selected"}</div>
+                      <div>Round: {formatRoundLabel(summary.context?.hr_round || payload.hr_round) || "Standard"}</div>
+                      <div>Focus: {safeText(summary.context?.focus_areas || payload.focus_areas) || selectionFocus}</div>
                       <div>Experience: {safeText(summary.context?.experience || payload.experience)}</div>
                       <div>Config mode: {safeText(summary.context?.config_mode || payload.config_mode)}</div>
                       <div>Practice type: {safeText(summary.context?.practice_type || payload.practice_type)}</div>

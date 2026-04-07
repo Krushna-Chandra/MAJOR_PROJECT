@@ -1,4 +1,5 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 import {
   BarChart3,
   Brain,
@@ -65,6 +66,25 @@ const socialIcons = [
 ];
 
 function AboutUs() {
+  const navigate = useNavigate();
+
+  React.useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("visible");
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.2 }
+    );
+
+    document.querySelectorAll(".reveal").forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <>
       <Navbar />
@@ -310,6 +330,22 @@ function AboutUs() {
               <div><Rocket size={18} /> Faster learning cycles</div>
             </div>
           </section>
+
+          <div className="mock-section cta-section reveal" style={{ padding: "70px 30px", marginTop: 40 }}>
+            <div style={{ maxWidth: 900, margin: "0 auto", textAlign: "center" }}>
+              <h2 style={{ margin: 0 }}>Start your AI Interview Journey Today</h2>
+              <p style={{ marginTop: 12, fontSize: 18, opacity: 0.9 }}>
+                Dive into a real mock interview and get instant AI feedback to sharpen your skills.
+              </p>
+              <button
+                className="mock-btn"
+                style={{ marginTop: 24 }}
+                onClick={() => navigate("/mock-interview")}
+              >
+                Start Interview
+              </button>
+            </div>
+          </div>
 
         </div>
 
