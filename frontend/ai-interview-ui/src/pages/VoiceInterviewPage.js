@@ -719,8 +719,6 @@ function VoiceInterviewPage() {
       );
       const normalizedReport = normalizeReport(response.data, payload);
       stopSpeech();
-      stopCamera();
-      await exitFullscreen();
       navigate(`/reports/${sessionIdRef.current}`, {
         replace: true,
         state: {
@@ -739,8 +737,6 @@ function VoiceInterviewPage() {
       if (requestMessage.toLowerCase().includes("interview session not found")) {
         const fallbackReport = buildLocalFallbackReport(endedEarly);
         stopSpeech();
-        stopCamera();
-        await exitFullscreen();
         navigate(`/reports/${fallbackReport.session_id}`, {
           replace: true,
           state: {
@@ -952,6 +948,8 @@ function VoiceInterviewPage() {
   const restoreFullscreen = async () => {
     try {
       await ensureFullscreen();
+      await startCamera();
+      await attachCameraPreview();
       setFullscreenBlocked(false);
       setError("");
       setStatus("Fullscreen restored. Continue answering.");

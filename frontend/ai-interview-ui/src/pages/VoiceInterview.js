@@ -1035,7 +1035,10 @@ function VoiceInterview() {
   };
 
   const startCamera = async () => {
-    if (cameraRef.current) return true;
+    if (cameraRef.current) {
+      await attachCameraPreview();
+      return true;
+    }
     if (!navigator.mediaDevices?.getUserMedia) {
       throw new Error("Camera access is not supported in this browser.");
     }
@@ -1249,8 +1252,6 @@ function VoiceInterview() {
       }
       stopListening();
       stopSpeech();
-      stopCamera();
-      await exitFullscreen();
       setTimeLeftSeconds(null);
     }
   };
@@ -1301,8 +1302,6 @@ function VoiceInterview() {
     try {
       interruptInterviewFlow();
       cancelActiveRequest();
-      stopCamera();
-      await exitFullscreen();
       await speak(closingMessage);
       await finishInterview(sessionIdRef.current, { endedEarly: true });
     } catch (requestError) {
@@ -1572,6 +1571,8 @@ function VoiceInterview() {
   const restoreFullscreen = async () => {
     try {
       await ensureFullscreen();
+      await startCamera();
+      await attachCameraPreview();
       dialogOpenRef.current = false;
       setShowFullscreenPrompt(false);
       setFullscreenBlocked(false);
