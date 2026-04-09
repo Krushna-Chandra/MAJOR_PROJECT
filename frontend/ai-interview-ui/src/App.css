@@ -7573,11 +7573,14 @@ button {
 
 .voice-ai-video-panel {
   padding: 14px;
+  display: flex;
+  flex-direction: column;
 }
 
 .voice-ai-video {
   width: 100%;
   height: min(29vh, 270px);
+  flex-shrink: 0;
   object-fit: cover;
   background: #020617;
   border-radius: 18px;

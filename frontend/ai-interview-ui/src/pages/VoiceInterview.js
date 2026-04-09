@@ -305,20 +305,20 @@ const getInterviewPresenceMeta = ({
       detail: "The session is waiting for fullscreen to be restored before the interviewer continues.",
     };
   }
-  if (busy) {
-    return {
-      activeKey: "evaluating",
-      bubble: "Thinking",
-      headline: "Evaluating your answer",
-      detail: "The interviewer is scoring your latest response and preparing the next step in the interview.",
-    };
-  }
   if (aiSpeaking) {
     return {
       activeKey: "ai-speaking",
       bubble: "Ask",
       headline: "Asking the current question",
       detail: "The interviewer is actively speaking, so you can focus on the wording before answering.",
+    };
+  }
+  if (busy) {
+    return {
+      activeKey: "evaluating",
+      bubble: "Thinking",
+      headline: "Evaluating your answer",
+      detail: "The interviewer is scoring your latest response and preparing the next step in the interview.",
     };
   }
   if (listening && speechRecognitionAvailable) {
@@ -1760,11 +1760,11 @@ function VoiceInterview() {
     ? "Paused"
     : dialogOpen
       ? "Awaiting action"
-      : busy
-        ? "Evaluating"
-        : aiSpeaking
+      : aiSpeaking
           ? "AI speaking"
-          : listening
+          : busy
+            ? "Evaluating"
+            : listening
             ? "Mic live"
             : started
               ? "Standing by"
