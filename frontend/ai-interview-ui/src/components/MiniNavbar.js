@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { LayoutDashboard, LogOut, Settings, Users } from "lucide-react";
 import ImageCropModal from "./ImageCropModal";
-import logo from "../assets/logo.png";
+import logo from "../assets/Website Logo.png";
 
 export default function MiniNavbar() {
   const navigate = useNavigate();
@@ -81,12 +81,12 @@ export default function MiniNavbar() {
         <Link to="/" className="navbar-home-link" onClick={closeMobileMenu}>
           <img
             src={logo}
-            alt="APIS Logo"
+            alt="INTERVIEWR Logo"
             className="navbar-logo"
           />
           <div className="navbar-brand">
             <div className="navbar-brand-title">
-              <h2>APIS</h2>
+              <h2>INTERVIEWR</h2>
               <span>| AI Powered Interview System</span>
             </div>
           </div>

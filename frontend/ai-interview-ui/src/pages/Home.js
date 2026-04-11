@@ -278,7 +278,7 @@ function Home() {
             Land the Job.
           </h1>
           <p>
-            APIS helps you prepare for interviews with AI-driven feedback and
+            INTERVIEWR helps you prepare for interviews with AI-driven feedback and
             realistic mock interviews — all in one polished experience.
           </p>
 
@@ -411,7 +411,7 @@ function Home() {
           <span className="section-heading-badge">Core Experience</span>
           <h2 className="section-heading-title section-heading-title-glow">Features</h2>
           <p className="section-heading-copy">
-            Explore the key tools inside APIS that help you practice smarter and improve faster.
+            Explore the key tools inside INTERVIEWR that help you practice smarter and improve faster.
           </p>
         </div>
         <div className="feature-grid">
@@ -605,7 +605,7 @@ function Home() {
       {/* BENEFITS */}
       <div className="mock-section benefits-section reveal">
         <div className="section-heading section-heading-centered">
-          <span className="section-heading-badge">Why APIS</span>
+          <span className="section-heading-badge">Why INTERVIEWR</span>
           <h2 className="section-heading-title section-heading-title-glow">Benefits / Why Use It</h2>
           <p className="section-heading-copy">
             Everything in the platform is designed to help you practice faster, improve clearly, and walk into interviews with more confidence.
@@ -624,13 +624,13 @@ function Home() {
 
       {/* ABOUT SECTION */}
       <div id="about" className="mock-section" style={{ background: "#fff", padding: "40px 0", marginTop: 40 }}>
-        <div className="section-title">About APIS</div>
+        <div className="section-title">About INTERVIEWR</div>
         <div style={{ maxWidth: 900, margin: "0 auto", color: "#333", lineHeight: 1.7 }}>
           <p>
-            APIS (AI Powered Interview System) is designed to help you practice, polish, and shine during real interviews — using modern AI feedback and interactive interview modes.
+            INTERVIEWR (AI Powered Interview System) is designed to help you practice, polish, and shine during real interviews — using modern AI feedback and interactive interview modes.
           </p>
           <p>
-            Whether you’re interviewing for technical roles, HR rounds, or resume-based hiring, APIS provides structured practice, scoring insights, and guidance to help you level up quickly.
+            Whether you’re interviewing for technical roles, HR rounds, or resume-based hiring, INTERVIEWR provides structured practice, scoring insights, and guidance to help you level up quickly.
           </p>
           <p>Need help? Reach out via our support channels or check the FAQ at the bottom of the page.</p>
         </div>
@@ -654,7 +654,7 @@ function Home() {
       </div>
 
       {/* FOOTER */}
-      <div className="footer">© 2026 APIS - AI Powered Interview System</div>
+      <div className="footer">© 2026 INTERVIEWR - AI Powered Interview System</div>
 
     </>
   );

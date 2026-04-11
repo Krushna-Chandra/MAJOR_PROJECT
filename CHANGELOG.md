@@ -16,7 +16,7 @@ Complete redesign and implementation of the AI Interview System with professiona
 - ✅ Two CTA buttons: "Browse Categories" + "Quick Interview"
 - ✅ Stats section with 3 metrics (4.8⭐, 120k+, 95%)
 - ✅ 4 interview category cards (HR, Technical, Behavioral, Register Face)
-- ✅ Why APIS features section (3 feature cards with icons)
+- ✅ Why INTERVIEWR features section (3 feature cards with icons)
 - ✅ Professional footer
 
 **CSS Classes Used**:

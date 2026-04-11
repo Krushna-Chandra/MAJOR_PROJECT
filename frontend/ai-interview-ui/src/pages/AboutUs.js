@@ -97,10 +97,10 @@ function AboutUs() {
               <span className="about-lab-title">ABOUT US</span>
             </div>
             <div className="about-lab-copy">
-              <span className="about-lab-eyebrow">About APIS</span>
+              <span className="about-lab-eyebrow">About INTERVIEWR</span>
               <h1>An interview-prep studio with motion, intelligence, and feedback that keeps evolving.</h1>
               <p>
-                APIS is built to make interview preparation feel alive. Instead of static question lists, we combine AI guidance,
+                INTERVIEWR is built to make interview preparation feel alive. Instead of static question lists, we combine AI guidance,
                 voice-led flow, structured analysis, and repeatable practice loops inside one focused system.
               </p>
 
@@ -128,7 +128,7 @@ function AboutUs() {
                 <div className="about-lab-stage-beam" />
 
                 <div className="about-lab-center-core">
-                  <span>APIS</span>
+                  <span>INTERVIEWR</span>
                   <strong>Interview clarity</strong>
                 </div>
 
@@ -294,7 +294,7 @@ function AboutUs() {
 
           <section className="about-lab-process">
             <div className="about-lab-process-header">
-              <span className="about-lab-chip">How APIS works</span>
+              <span className="about-lab-chip">How INTERVIEWR works</span>
               <h2>The product is built around a continuous cycle: prepare, perform, review, repeat.</h2>
               <p>
                 Every part of the experience is designed to create momentum. Users should feel guided before the interview,
@@ -318,7 +318,7 @@ function AboutUs() {
               <span className="about-lab-chip">Vision</span>
               <h2>Interview preparation should feel like a product that moves with the user, not a page they read once.</h2>
               <p>
-                APIS is moving toward a preparation experience that feels active, responsive, and motivating. The goal is simple:
+                INTERVIEWR is moving toward a preparation experience that feels active, responsive, and motivating. The goal is simple:
                 help people practice with more confidence, understand their performance faster, and improve with each session.
               </p>
             </div>
@@ -348,7 +348,7 @@ function AboutUs() {
         </div>
 
         <footer className="about-lab-footer">
-          <span>© 2026 APIS - AI Powered Interview System</span>
+          <span>© 2026 INTERVIEWR - AI Powered Interview System</span>
         </footer>
       </div>
     </>

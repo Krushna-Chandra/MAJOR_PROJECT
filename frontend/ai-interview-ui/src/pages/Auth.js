@@ -1,8 +1,9 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { ArrowRight, BriefcaseBusiness, ShieldCheck, Sparkles } from "lucide-react";
 import axios from "axios";
 import "../App.css";
-import apisLogo from "../assets/logo.png";
+import interviewrLogo from "../assets/Website Logo.png";
 
 const api = axios.create({
   baseURL: process.env.REACT_APP_API_BASE || "http://127.0.0.1:8000"
@@ -22,6 +23,24 @@ function Auth() {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+
+  const authHighlights = [
+    {
+      icon: BriefcaseBusiness,
+      title: "Role-focused practice",
+      description: "Prepare for HR, technical, resume, and mock rounds in one place.",
+    },
+    {
+      icon: ShieldCheck,
+      title: "Reliable account access",
+      description: "Secure sign-in and saved progress help you continue where you left off.",
+    },
+    {
+      icon: Sparkles,
+      title: "Actionable AI feedback",
+      description: "Get clear suggestions after every session to improve faster.",
+    },
+  ];
 
   const clearFields = () => {
     setFirstName("");
@@ -79,182 +98,197 @@ function Auth() {
   };
 
   return (
-    <div className="auth-bg">
-      <div className="auth-panel">
-        <div className="auth-left">
-          <svg width="220" height="220" viewBox="0 0 220 220" fill="none" xmlns="http://www.w3.org/2000/svg" className="cloud-large">
-            <path d="M110 220C170 220 220 170 220 110C220 50 170 0 110 0C50 0 0 50 0 110C0 170 50 220 110 220Z" fill="#fff" fillOpacity="0.18" />
-          </svg>
-          <svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg" className="cloud-small">
-            <path d="M60 120C93.1371 120 120 93.1371 120 60C120 26.8629 93.1371 0 60 0C26.8629 0 0 26.8629 0 60C0 93.1371 26.8629 120 60 120Z" fill="#fff" fillOpacity="0.12" />
-          </svg>
-          <div className="rocket-circle">
-            <img src={apisLogo} alt="APIS" className="auth-apis-logo" />
+    <div className="auth-modern-page">
+      <div className="auth-modern-layout">
+        <section className="auth-modern-showcase">
+          <div className="auth-modern-badge">INTERVIEWR</div>
+          <div className="auth-modern-brand">
+            <div className="auth-modern-logo-wrap">
+              <img src={interviewrLogo} alt="INTERVIEWR" className="auth-modern-logo" />
+            </div>
+            <div className="auth-modern-copy">
+              <h1>Practice smarter with a cleaner interview workflow.</h1>
+              <p>
+                A focused platform for mock interviews, resume-based sessions, and AI feedback that helps candidates improve with clarity.
+              </p>
+            </div>
           </div>
-          <h2 className="auth-title">Welcome to<br />APIS</h2>
-          <p className="auth-desc">
-            Learn your skills and career, communicate, and discover new opportunities with our AI-powered interview system.
-          </p>
-        </div>
-        <div className="auth-right">
-          <div className="auth-card">
-            {isLogin ? (
-              <>
-                <h3 className="auth-header">Sign In to your account</h3>
-                {error && (
-                  <div className="auth-error">{error}</div>
-                )}
-                <form onSubmit={handleSubmit}>
-                  <div className="auth-field">
-                    <label className="auth-label">E-mail Address</label>
-                    <input
-                      type="email"
-                      placeholder="Enter your mail"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="auth-input"
-                    />
+
+          <div className="auth-modern-highlight-list">
+            {authHighlights.map((item) => {
+              const Icon = item.icon;
+              return (
+                <article key={item.title} className="auth-modern-highlight-card">
+                  <div className="auth-modern-highlight-icon">
+                    <Icon size={20} />
                   </div>
-                  <div className="auth-field auth-password">
-                    <label className="auth-label">Password</label>
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      placeholder="Enter your password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="auth-input"
-                    />
-                    <span
-                      className="auth-eye"
-                      onClick={() => setShowPassword((prev) => !prev)}
-                    >
-                      {showPassword ? "Hide" : "Show"}
-                    </span>
+                  <div>
+                    <h3>{item.title}</h3>
+                    <p>{item.description}</p>
                   </div>
-                  <div className="auth-btn-row">
-                    <button type="submit" disabled={loading} className="auth-btn">
-                      {loading ? (
-                        <>
-                          <span className="auth-btn-spinner" aria-hidden="true" />
-                          <span>Signing In...</span>
-                        </>
-                      ) : (
-                        "Sign In"
-                      )}
-                    </button>
-                  </div>
-                </form>
-                <div className="auth-switch">
-                  <span className="auth-link"
-                    onClick={() => {
-                      clearFields();
-                      setIsLogin(false);
-                    }}>
-                    New user? Register
-                  </span>
-                </div>
-              </>
-            ) : (
-              <>
-                <h3 className="auth-header">Create your account</h3>
-                {error && (
-                  <div className="auth-error">{error}</div>
-                )}
-                <form onSubmit={handleSubmit}>
-                  <div className="auth-field">
-                    <label className="auth-label">First Name</label>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="auth-modern-form-shell">
+          <div className="auth-modern-form-card">
+            <div className="auth-modern-tabbar" role="tablist" aria-label="Authentication mode">
+              <button
+                type="button"
+                className={`auth-modern-tab ${isLogin ? "is-active" : ""}`}
+                onClick={() => {
+                  clearFields();
+                  setError(null);
+                  setIsLogin(true);
+                }}
+              >
+                Sign In
+              </button>
+              <button
+                type="button"
+                className={`auth-modern-tab ${!isLogin ? "is-active" : ""}`}
+                onClick={() => {
+                  clearFields();
+                  setError(null);
+                  setIsLogin(false);
+                }}
+              >
+                Register
+              </button>
+            </div>
+
+            <div className="auth-modern-form-head">
+              <h2 className="auth-modern-title">
+                {isLogin ? "Welcome back" : "Create your account"}
+              </h2>
+              <p className="auth-modern-subtitle">
+                {isLogin
+                  ? "Sign in to continue your interview preparation journey."
+                  : "Join INTERVIEWR and start practicing with guided AI interview sessions."}
+              </p>
+            </div>
+
+            {error && <div className="auth-modern-error">{error}</div>}
+
+            <form onSubmit={handleSubmit} className="auth-modern-form">
+              {!isLogin && (
+                <div className="auth-modern-grid">
+                  <div className="auth-modern-field">
+                    <label className="auth-modern-label">First Name</label>
                     <input
                       type="text"
-                      placeholder="Enter your first name"
+                      placeholder="John"
                       value={firstName}
                       onChange={(e) => setFirstName(e.target.value)}
-                      className="auth-input"
+                      className="auth-modern-input"
                     />
                   </div>
-                  <div className="auth-field">
-                    <label className="auth-label">Last Name</label>
+                  <div className="auth-modern-field">
+                    <label className="auth-modern-label">Last Name</label>
                     <input
                       type="text"
-                      placeholder="Enter your last name"
+                      placeholder="Doe"
                       value={lastName}
                       onChange={(e) => setLastName(e.target.value)}
-                      className="auth-input"
+                      className="auth-modern-input"
                     />
                   </div>
-                  <div className="auth-field">
-                    <label className="auth-label">E-mail Address</label>
-                    <input
-                      type="email"
-                      placeholder="Enter your mail"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="auth-input"
-                    />
-                  </div>
-                  <div className="auth-field auth-password">
-                    <label className="auth-label">Password</label>
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      placeholder="Enter your password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="auth-input"
-                    />
-                    <span
-                      className="auth-eye"
-                      onClick={() => setShowPassword((prev) => !prev)}
-                    >
-                      {showPassword ? "Hide" : "Show"}
-                    </span>
-                  </div>
-                  <div className="auth-field auth-password">
-                    <label className="auth-label">Confirm Password</label>
+                </div>
+              )}
+
+              <div className="auth-modern-field">
+                <label className="auth-modern-label">Email Address</label>
+                <input
+                  type="email"
+                  placeholder="name@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="auth-modern-input"
+                />
+              </div>
+
+              <div className="auth-modern-field auth-modern-password-field">
+                <label className="auth-modern-label">Password</label>
+                <input
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Enter your password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="auth-modern-input"
+                />
+                <button
+                  type="button"
+                  className="auth-modern-eye"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                >
+                  {showPassword ? "Hide" : "Show"}
+                </button>
+              </div>
+
+              {!isLogin && (
+                <>
+                  <div className="auth-modern-field auth-modern-password-field">
+                    <label className="auth-modern-label">Confirm Password</label>
                     <input
                       type={showConfirm ? "text" : "password"}
                       placeholder="Confirm your password"
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
-                      className="auth-input"
+                      className="auth-modern-input"
                     />
-                    <span
-                      className="auth-eye"
+                    <button
+                      type="button"
+                      className="auth-modern-eye"
                       onClick={() => setShowConfirm((prev) => !prev)}
                     >
                       {showConfirm ? "Hide" : "Show"}
-                    </span>
-                  </div>
-                  <div className="auth-agree">
-                    <input type="checkbox" required className="auth-checkbox" />
-                    <span className="auth-agree-text">
-                      By Signing Up, I agree with <button type="button" className="auth-inline-link">Terms & Conditions</button>
-                    </span>
-                  </div>
-                  <div className="auth-btn-row">
-                    <button type="submit" disabled={loading} className="auth-btn">
-                      {loading ? (
-                        <>
-                          <span className="auth-btn-spinner" aria-hidden="true" />
-                          <span>Creating Account...</span>
-                        </>
-                      ) : (
-                        "Sign Up"
-                      )}
                     </button>
                   </div>
-                </form>
-                <div className="auth-switch">
-                  <span className="auth-link"
-                    onClick={() => {
-                      clearFields();
-                      setIsLogin(true);
-                    }}>
-                    Already registered? Sign In
-                  </span>
-                </div>
-              </>
-            )}
+
+                  <label className="auth-modern-checkrow">
+                    <input type="checkbox" required className="auth-modern-checkbox" />
+                    <span>
+                      I agree to the <button type="button" className="auth-modern-inline-link">Terms & Conditions</button>
+                    </span>
+                  </label>
+                </>
+              )}
+
+              <button type="submit" disabled={loading} className="auth-modern-submit">
+                {loading ? (
+                  <>
+                    <span className="auth-btn-spinner" aria-hidden="true" />
+                    <span>{isLogin ? "Signing In..." : "Creating Account..."}</span>
+                  </>
+                ) : (
+                  <>
+                    <span>{isLogin ? "Sign In" : "Create Account"}</span>
+                    <ArrowRight size={18} />
+                  </>
+                )}
+              </button>
+            </form>
+
+            <div className="auth-modern-footer">
+              <span>
+                {isLogin ? "New to INTERVIEWR?" : "Already have an account?"}
+              </span>
+              <button
+                type="button"
+                className="auth-modern-switch"
+                onClick={() => {
+                  clearFields();
+                  setError(null);
+                  setIsLogin((prev) => !prev);
+                }}
+              >
+                {isLogin ? "Create one" : "Sign in"}
+              </button>
+            </div>
           </div>
-        </div>
+        </section>
       </div>
     </div>
   );

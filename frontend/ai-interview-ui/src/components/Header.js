@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import logo from '../assets/logo.png';
+import logo from '../assets/Website Logo.png';
 
 const Header = () => {
   return (
@@ -23,7 +23,7 @@ const Header = () => {
       >
         <img
           src={logo}
-          alt="APIS Logo"
+          alt="INTERVIEWR Logo"
           style={{
             height: '40px',
             width: '40px',
@@ -38,7 +38,7 @@ const Header = () => {
           color: '#333',
           letterSpacing: '2px',
           marginRight: 'auto'
-        }}>APIS</span>
+        }}>INTERVIEWR</span>
       </Link>
     </nav>
   );
