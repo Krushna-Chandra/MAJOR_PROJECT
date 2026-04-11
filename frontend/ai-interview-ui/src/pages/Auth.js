@@ -243,6 +243,18 @@ function Auth() {
                   </button>
                 </div>
 
+                {isLogin && (
+                  <div className="auth-modern-forgot">
+                    <button
+                      type="button"
+                      className="auth-modern-inline-link"
+                      onClick={() => navigate("/forgot-password")}
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
+                )}
+
                 {!isLogin && (
                   <>
                     <div className="auth-modern-field auth-modern-password-field">

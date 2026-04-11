@@ -15789,6 +15789,16 @@ button {
 
 }
 
+.auth-modern-forgot {
+
+  display: flex;
+
+  justify-content: flex-end;
+
+  margin-top: -4px;
+
+}
+
 
 
 .auth-modern-checkbox {
