@@ -1,4 +1,4 @@
-﻿import React from "react";
+import React from "react";
 import { useNavigate } from "react-router-dom";
 import { BrainCircuit, BriefcaseBusiness, Code2, FileSearch, Mic2, Sigma } from "lucide-react";
 import analyticsImage from "../assets/Analytics.png";
@@ -128,6 +128,29 @@ const features = [
   },
 ];
 
+const faqItems = [
+  {
+    question: "How does INTERVIEWR help me improve faster?",
+    answer:
+      "INTERVIEWR combines guided interview flows, instant AI feedback, and progress tracking so you can spot weak areas quickly and improve with each session.",
+  },
+  {
+    question: "Which interview types can I practice here?",
+    answer:
+      "You can prepare for HR, technical, behavioral, mock, aptitude, voice, and resume-based interviews in one platform.",
+  },
+  {
+    question: "Do I get feedback after every session?",
+    answer:
+      "Yes. The platform is designed to give you immediate signals on clarity, confidence, structure, and overall performance after practice rounds.",
+  },
+  {
+    question: "Can I use it even if I am just starting interview prep?",
+    answer:
+      "Absolutely. The guided flows are beginner-friendly, while the range of interview formats also makes the platform useful for more advanced practice.",
+  },
+];
+
 function Home() {
   const navigate = useNavigate();
   const featureSectionRef = React.useRef(null);
@@ -135,6 +158,7 @@ function Home() {
   const [activeStep, setActiveStep] = React.useState(0);
   const [zoomedImage, setZoomedImage] = React.useState(null);
   const [isZoomAnimating, setIsZoomAnimating] = React.useState(false);
+  const [openFaqIndex, setOpenFaqIndex] = React.useState(0);
   const [storedUser, setStoredUser] = React.useState(() => {
     try {
       return JSON.parse(localStorage.getItem("user"));
@@ -521,7 +545,7 @@ function Home() {
       </div>
 
       {/* HOW IT WORKS */}
-      <div className="mock-section how-it-works-section reveal">
+      <div id="how-it-works" className="mock-section how-it-works-section reveal">
         <div className="section-heading section-heading-centered">
           <span className="section-heading-badge">Guided Journey</span>
           <h2 className="section-heading-title section-heading-title-glow">How It Works</h2>
@@ -622,20 +646,6 @@ function Home() {
         </div>
       </div>
 
-      {/* ABOUT SECTION */}
-      <div id="about" className="mock-section" style={{ background: "#fff", padding: "40px 0", marginTop: 40 }}>
-        <div className="section-title">About INTERVIEWR</div>
-        <div style={{ maxWidth: 900, margin: "0 auto", color: "#333", lineHeight: 1.7 }}>
-          <p>
-            INTERVIEWR (AI Powered Interview System) is designed to help you practice, polish, and shine during real interviews — using modern AI feedback and interactive interview modes.
-          </p>
-          <p>
-            Whether you’re interviewing for technical roles, HR rounds, or resume-based hiring, INTERVIEWR provides structured practice, scoring insights, and guidance to help you level up quickly.
-          </p>
-          <p>Need help? Reach out via our support channels or check the FAQ at the bottom of the page.</p>
-        </div>
-      </div>
-
       {/* CTA SECTION */}
       <div className="mock-section cta-section reveal" style={{ padding: "70px 30px", marginTop: 40 }}>
         <div style={{ maxWidth: 900, margin: "0 auto", textAlign: "center" }}>
@@ -650,6 +660,65 @@ function Home() {
           >
             Start Interview
           </button>
+        </div>
+      </div>
+
+      <div id="faqs" className="mock-section faq-support-section reveal">
+        <div className="section-heading section-heading-centered">
+          <span className="section-heading-badge">Support Center</span>
+          <h2 className="section-heading-title section-heading-title-glow">FAQs</h2>
+          <p className="section-heading-copy">
+            Quick answers to the most common questions, presented in a cleaner support experience that fits the INTERVIEWR style.
+          </p>
+        </div>
+
+        <div className="faq-support-grid">
+          <div className="faq-panel">
+            <div className="faq-panel-header">
+              <span className="faq-panel-kicker">Frequently asked questions</span>
+              <h3>Everything users usually want to know before starting</h3>
+            </div>
+
+            <div className="faq-list" role="list">
+              {faqItems.map((item, index) => {
+                const isOpen = index === openFaqIndex;
+
+                return (
+                  <article
+                    key={item.question}
+                    className={`faq-item ${isOpen ? "is-open" : ""}`}
+                  >
+                    <button
+                      type="button"
+                      className="faq-question"
+                      onClick={() => setOpenFaqIndex(isOpen ? -1 : index)}
+                      aria-expanded={isOpen}
+                    >
+                      <span>{item.question}</span>
+                      <span className="faq-toggle" aria-hidden="true">
+                        {isOpen ? "−" : "+"}
+                      </span>
+                    </button>
+                    <div className="faq-answer" hidden={!isOpen}>
+                      <p>{item.answer}</p>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </div>
+
+          <aside id="contact-support" className="support-panel">
+            <span className="support-panel-kicker">Contact support</span>
+            <h3>We can connect a dedicated support email here next</h3>
+            <p>
+              This area is now ready for your official support mail. Once you share the email address, I’ll connect it so clicking it opens Gmail or the user’s default mail app directly with a new message.
+            </p>
+            <div className="support-placeholder-card">
+              <span className="support-placeholder-label">Support email</span>
+              <span className="support-placeholder-value">Coming soon</span>
+            </div>
+          </aside>
         </div>
       </div>
 

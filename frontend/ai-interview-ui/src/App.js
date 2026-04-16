@@ -82,6 +82,31 @@ function ScrollRevealManager() {
   return null;
 }
 
+function HashScrollManager() {
+  const location = useLocation();
+
+  useEffect(() => {
+    if (!location.hash) {
+      return undefined;
+    }
+
+    const hashTarget = location.hash.replace("#", "");
+
+    const scrollToTarget = () => {
+      const element = document.getElementById(hashTarget);
+      if (element) {
+        element.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    };
+
+    const timeoutId = window.setTimeout(scrollToTarget, 120);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [location.hash, location.pathname]);
+
+  return null;
+}
+
 function AppRoutes({ routeLocation }) {
   return (
     <Routes location={routeLocation}>
@@ -317,6 +342,7 @@ function App() {
   return (
     <BrowserRouter>
       <ScrollRevealManager />
+      <HashScrollManager />
       <AnimatedRoutes />
     </BrowserRouter>
   );

@@ -1,11 +1,11 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Mail,
   Phone,
   MapPin,
   Facebook,
-  Twitter,
+  Github,
   Linkedin,
   Instagram,
   Send,
@@ -16,50 +16,92 @@ import "../styles/Footer.css";
 function Footer() {
   const [email, setEmail] = useState("");
   const [subscribeStatus, setSubscribeStatus] = useState(null);
+  const [isSupportOpen, setIsSupportOpen] = useState(false);
+  const supportEmail = "coming-soon@interviewr.com";
+  const supportComposeUrl = `https://mail.google.com/mail/u/0/?fs=1&tf=cm&source=mailto&to=${encodeURIComponent(supportEmail)}`;
+  const defaultSupportComposeUrl =
+    "https://mail.google.com/mail/u/0/?fs=1&tf=cm&source=mailto&to=support@interviewr.com";
   const members = [
     {
       name: "Member 1",
       links: {
-        Facebook: "https://www.facebook.com/",
-        Twitter: "https://x.com/",
-        LinkedIn: "https://www.linkedin.com/",
-        Instagram: "https://www.instagram.com/",
+        Facebook: "https://www.facebook.com/share/14ZboXtdp5a/",
+        GitHub: "https://github.com/Bhababhanjan1",
+        LinkedIn:
+          "https://www.linkedin.com/in/bhababhanjan-panda-65b340275?utm_source=share&utm_campaign=share_via&utm_content=profile&utm_medium=android_app",
+        Instagram:
+          "https://www.instagram.com/bhababhanjanpanda04?utm_source=qr&igsh=MTR5dzhlb3d1a3B0bg%3D%3D",
       },
     },
     {
       name: "Member 2",
       links: {
-        Facebook: "https://www.facebook.com/",
-        Twitter: "https://x.com/",
-        LinkedIn: "https://www.linkedin.com/",
-        Instagram: "https://www.instagram.com/",
+        Facebook: "https://www.facebook.com/share/1HycJX4VCw/",
+        GitHub: "https://github.com/Krushna-Chandra",
+        LinkedIn: "https://www.linkedin.com/in/krushna-chandra-bindhani-1b1342275/",
+        Instagram:
+          "https://www.instagram.com/krushna__chandra_bindhani?igsh=MXNqNG8zeXExeW9sYw==",
       },
     },
     {
       name: "Member 3",
       links: {
-        Facebook: "https://www.facebook.com/",
-        Twitter: "https://x.com/",
-        LinkedIn: "https://www.linkedin.com/",
-        Instagram: "https://www.instagram.com/",
+        Facebook: "https://www.facebook.com/share/181DgSYxpS/",
+        GitHub: "https://github.com/binaykumardas24",
+        LinkedIn:
+          "https://www.linkedin.com/in/binay-kumar-das-57b9b7275?utm_source=share&utm_campaign=share_via&utm_content=profile&utm_medium=android_app",
+        Instagram:
+          "https://www.instagram.com/__bi_n_ay_?utm_source=qr&igsh=ODFvczMwcTA2dHVw",
       },
     },
     {
       name: "Member 4",
       links: {
         Facebook: "https://www.facebook.com/",
-        Twitter: "https://x.com/",
+        GitHub: "https://github.com/",
         LinkedIn: "https://www.linkedin.com/",
         Instagram: "https://www.instagram.com/",
       },
     },
   ];
   const socialPlatforms = [
-    { name: "Facebook", Icon: Facebook },
-    { name: "Twitter", Icon: Twitter },
+    { name: "GitHub", Icon: Github },
     { name: "LinkedIn", Icon: Linkedin },
+    { name: "Facebook", Icon: Facebook },
     { name: "Instagram", Icon: Instagram },
   ];
+
+  useEffect(() => {
+    const clearFocusedSocialLink = () => {
+      if (document.hidden && document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+
+      if (document.hidden) {
+        setIsSupportOpen(false);
+      }
+    };
+
+    document.addEventListener("visibilitychange", clearFocusedSocialLink);
+
+    return () => {
+      document.removeEventListener("visibilitychange", clearFocusedSocialLink);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleDocumentClick = (event) => {
+      if (!event.target.closest(".footer-support-item")) {
+        setIsSupportOpen(false);
+      }
+    };
+
+    document.addEventListener("click", handleDocumentClick);
+
+    return () => {
+      document.removeEventListener("click", handleDocumentClick);
+    };
+  }, []);
 
   const handleNewsletterSubmit = (e) => {
     e.preventDefault();
@@ -68,6 +110,12 @@ function Footer() {
       setEmail("");
       setTimeout(() => setSubscribeStatus(null), 3000);
     }
+  };
+
+  const openSupportGmail = (event, composeUrl) => {
+    event.preventDefault();
+    setIsSupportOpen(false);
+    window.location.href = composeUrl;
   };
 
   return (
@@ -168,13 +216,38 @@ function Footer() {
                 <Link to="/about">About Us</Link>
               </li>
               <li>
-                <a href="#guides">Interview Guides</a>
+                <Link to="/#how-it-works">Interview Guides</Link>
               </li>
               <li>
-                <a href="#faqs">FAQs</a>
+                <Link to="/#faqs">FAQs</Link>
               </li>
               <li>
-                <a href="#support">Contact Support</a>
+                <div className={`footer-support-item ${isSupportOpen ? "is-open" : ""}`}>
+                  <button
+                    type="button"
+                    className="footer-support-trigger"
+                    onClick={() => setIsSupportOpen((current) => !current)}
+                    aria-expanded={isSupportOpen}
+                    aria-controls="footer-support-panel"
+                  >
+                    Contact Support
+                  </button>
+                  <div
+                    id="footer-support-panel"
+                    className="footer-support-panel"
+                    aria-hidden={!isSupportOpen}
+                  >
+                    <span className="footer-support-label">Support email</span>
+                  <button
+                    type="button"
+                    className="footer-support-email"
+                    onClick={(event) => openSupportGmail(event, supportComposeUrl)}
+                    >
+                      <Mail size={14} />
+                      <span>{supportEmail}</span>
+                    </button>
+                  </div>
+                </div>
               </li>
             </ul>
           </div>
@@ -184,7 +257,15 @@ function Footer() {
             <h4 className="footer-section-title">Contact Us</h4>
             <div className="contact-item">
               <Mail size={18} />
-              <a href="mailto:support@interviewr.com">support@interviewr.com</a>
+              <button
+                type="button"
+                className="contact-email-button"
+                onClick={(event) =>
+                  openSupportGmail(event, defaultSupportComposeUrl)
+                }
+              >
+                support@interviewr.com
+              </button>
             </div>
             <div className="contact-item">
               <Phone size={18} />
