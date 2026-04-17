@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import "../App.css";
 import MiniNavbar from "../components/MiniNavbar";
-import resumeHero from "../assets/resume_based_interview.png";
+import resumeHero from "../assets/resume.png";
 
 function ResumeInterview() {
   const navigate = useNavigate();

@@ -3,7 +3,7 @@ import axios from "axios";
 import { Info } from "lucide-react";
 import "../App.css";
 import MiniNavbar from "../components/MiniNavbar";
-import aptitudeHero from "../assets/Analytics.png";
+import aptitudeHero from "../assets/aptitude.png";
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || "http://127.0.0.1:8000";
 const CODING_HISTORY_KEY = "apis-coding-question-history";

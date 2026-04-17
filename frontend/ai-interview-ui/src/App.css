@@ -3487,7 +3487,7 @@ button {
 }
 
 .profile-editor-modal__stretch-handle--left {
-  left: -6px;
+  left: 0;
 }
 
 .profile-editor-modal__stretch-handle--right {
@@ -5896,7 +5896,7 @@ button {
   position: relative;
   width: min(100%, 240px);
   min-height: 148px;
-  padding: 16px;
+  padding: 10px;
   border-radius: 26px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.08)),
@@ -7404,7 +7404,37 @@ button {
   overflow: visible;
 }
 
-.voice-ai-column {
+.voice-ai-live-layout {
+
+  grid-template-columns: 1fr;
+
+  align-content: start;
+
+}
+
+
+
+.voice-ai-live-top {
+
+  display: grid;
+
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+
+  gap: 14px;
+
+}
+
+
+
+.voice-ai-live-top .voice-ai-hud-panel {
+
+  grid-column: 1 / -1;
+
+}
+
+
+
+.voice-ai-column {
   display: grid;
   gap: 12px;
   min-height: 0;
@@ -7497,7 +7527,75 @@ button {
   text-align: center;
 }
 
-.voice-ai-presence-card {
+.voice-ai-live-speaker-panel {
+
+  transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
+
+}
+
+
+
+.voice-ai-live-speaker-panel-active {
+
+  border-color: rgba(96, 165, 250, 0.48);
+
+  box-shadow:
+
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+
+    0 0 0 1px rgba(125, 211, 252, 0.12),
+
+    0 0 38px rgba(59, 130, 246, 0.24),
+
+    0 24px 48px rgba(0, 0, 0, 0.28);
+
+  transform: translateY(-2px);
+
+}
+
+
+
+.voice-ai-live-indicator {
+
+  display: inline-flex;
+
+  align-items: center;
+
+  justify-content: center;
+
+  gap: 10px;
+
+  margin: 4px auto 0;
+
+  padding: 10px 14px;
+
+  border-radius: 999px;
+
+  background: rgba(15, 23, 42, 0.48);
+
+  color: #e2e8f0;
+
+}
+
+
+
+.voice-ai-live-indicator-dot {
+
+  width: 10px;
+
+  height: 10px;
+
+  border-radius: 50%;
+
+  background: #38bdf8;
+
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.72);
+
+}
+
+
+
+.voice-ai-presence-card {
   position: relative;
   display: grid;
   gap: 16px;
@@ -7527,7 +7625,7 @@ button {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: minmax(168px, 184px) minmax(0, 1fr);
+  grid-template-columns: minmax(232px, 268px) minmax(0, 1fr);
   gap: 20px;
   align-items: center;
 }
@@ -7552,8 +7650,8 @@ button {
 .voice-ai-character-stage {
   position: relative;
   width: 100%;
-  max-width: 184px;
-  min-height: 176px;
+  max-width: 252px;
+  min-height: 252px;
   aspect-ratio: 1 / 1;
   padding: 16px;
   border-radius: 22px;
@@ -7647,8 +7745,8 @@ button {
   position: relative;
   left: -6px;
   width: 100%;
-  max-width: 176px;
-  min-height: 176px;
+  max-width: 236px;
+  min-height: 236px;
   aspect-ratio: 1 / 1;
   height: 100%;
   display: grid;
@@ -8152,7 +8250,15 @@ button {
     linear-gradient(135deg, rgba(30, 41, 59, 0.96), rgba(37, 99, 235, 0.52));
 }
 
-.voice-ai-question-text {
+.voice-ai-live-bottom .voice-ai-question-card {
+
+  display: none;
+
+}
+
+
+
+.voice-ai-question-text {
   margin: 0;
   line-height: 1.45;
   color: #ffffff;
@@ -8173,7 +8279,71 @@ button {
   flex-direction: column;
 }
 
-.voice-ai-textarea {
+.voice-ai-answer-header {
+
+  display: flex;
+
+  align-items: flex-start;
+
+  justify-content: space-between;
+
+  gap: 12px;
+
+  flex-wrap: wrap;
+
+  margin-bottom: 12px;
+
+}
+
+
+
+.voice-ai-transcript-speaker-badge {
+
+  display: inline-flex;
+
+  align-items: center;
+
+  padding: 8px 12px;
+
+  border-radius: 999px;
+
+  font-size: 12px;
+
+  font-weight: 800;
+
+  letter-spacing: 0.04em;
+
+  text-transform: uppercase;
+
+}
+
+
+
+.voice-ai-transcript-speaker-badge-ai {
+
+  background: rgba(14, 165, 233, 0.14);
+
+  color: #67e8f9;
+
+  border: 1px solid rgba(34, 211, 238, 0.18);
+
+}
+
+
+
+.voice-ai-transcript-speaker-badge-user {
+
+  background: rgba(249, 115, 22, 0.16);
+
+  color: #fdba74;
+
+  border: 1px solid rgba(251, 146, 60, 0.22);
+
+}
+
+
+
+.voice-ai-textarea {
   width: 100%;
   height: min(16vh, 118px);
   border-radius: 18px;
@@ -8198,7 +8368,41 @@ button {
   border: 1px solid rgba(34, 211, 238, 0.14);
 }
 
-.voice-ai-transcript-box-warn {
+.voice-ai-transcript-box {
+
+  margin-top: 0;
+
+  min-height: 92px;
+
+  line-height: 1.65;
+
+}
+
+
+
+.voice-ai-transcript-box-ai {
+
+  background: rgba(8, 47, 73, 0.66);
+
+  color: #d6f8ff;
+
+}
+
+
+
+.voice-ai-transcript-box-user {
+
+  background: rgba(120, 53, 15, 0.3);
+
+  color: #ffedd5;
+
+  border-color: rgba(251, 146, 60, 0.22);
+
+}
+
+
+
+.voice-ai-transcript-box-warn {
   background: rgba(120, 53, 15, 0.28);
   color: #fdba74;
   border-color: rgba(251, 146, 60, 0.2);
@@ -8777,7 +8981,7 @@ button {
   }
 }
 
-@media (min-width: 1181px) {
+@media (min-width: 1181px) {
   .voice-ai-live-layout {
     height: auto;
   }
@@ -16687,6 +16891,18 @@ button {
 
 
 
+@media (max-width: 1179px) {
+
+  .voice-ai-live-top {
+
+    grid-template-columns: 1fr;
+
+  }
+
+}
+
+
+
 @media (max-width: 980px) {
 
   .auth-modern-layout {
@@ -17313,6 +17529,52 @@ button {
   padding: 0 30px;
 }
 
+.voice-ai-live-stage {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.voice-ai-session-stage-panel {
+  min-height: 430px;
+}
+
+.voice-ai-session-stage-panel .voice-ai-presence-card {
+  height: 100%;
+}
+
+.voice-ai-session-stage-panel .voice-ai-presence-top.is-compact {
+  grid-template-columns: 1fr;
+  justify-items: center;
+}
+
+.voice-ai-session-stage-panel .voice-ai-presence-top.is-compact .voice-ai-character-stage {
+  max-width: 320px;
+  min-height: 320px;
+}
+
+.voice-ai-session-video-panel {
+  overflow: hidden;
+  padding: 0;
+}
+
+.voice-ai-session-video-panel .voice-ai-meta-row,
+.voice-ai-session-video-panel .voice-ai-submeta-row {
+  display: none;
+}
+
+.voice-ai-session-video-panel .voice-ai-video {
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
+  object-fit: cover;
+}
+
+.voice-ai-session-stack {
+  display: grid;
+  gap: 12px;
+}
+
 @media (max-width: 1200px) {
   .selection-layout-section,
   .utility-page-section,
@@ -17328,6 +17590,10 @@ button {
   .utility-page-band {
     width: min(900px, calc(100vw - 32px)) !important;
     max-width: min(900px, calc(100vw - 32px)) !important;
+  }
+
+  .voice-ai-live-stage {
+    grid-template-columns: 1fr;
   }
 }
 
