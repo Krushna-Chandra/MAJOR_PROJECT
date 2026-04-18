@@ -125,6 +125,33 @@ KNOWN_RESUME_SKILLS = [
     "ui/ux",
 ]
 
+JOB_REQUIREMENT_SECTION_PATTERNS = [
+    "requirements",
+    "required qualifications",
+    "preferred qualifications",
+    "qualifications",
+    "responsibilities",
+    "what you will do",
+    "what we're looking for",
+    "must have",
+    "nice to have",
+]
+
+JOB_EDUCATION_PATTERNS = [
+    r"\b(bachelor(?:'s)?(?: degree)?|master(?:'s)?(?: degree)?|phd|b\.tech|m\.tech|bca|mca|b\.e\.|bsc|msc|mba|degree in [a-z &/,-]+)\b",
+]
+
+JOB_EXPERIENCE_PATTERNS = [
+    r"\b\d+\+?\s+years? of experience\b",
+    r"\b\d+\+?\s+years? experience\b",
+    r"\bexperience with [a-z0-9 +#./,-]+\b",
+    r"\bproven experience [a-z0-9 +#./,-]+\b",
+]
+
+JOB_CERTIFICATION_PATTERNS = [
+    r"\b(certification|certified|aws certified|pmp|scrum master|azure certification|google cloud certification)\b",
+]
+
 JOB_MATCH_HINTS = [
     "system design",
     "microservices",
@@ -481,9 +508,32 @@ def _extract_resume_lines(text: str, limit: int = 8) -> list[str]:
     return cleaned[:limit]
 
 
+def _extract_resume_lines_smart(text: str, limit: int = 8) -> list[str]:
+    lines = []
+    for raw_line in (text or "").splitlines():
+        cleaned_line = raw_line.strip(" -\t")
+        if cleaned_line:
+            lines.append(cleaned_line)
+        split_segments = re.split(r"\s{3,}|\t+|[•·▪◦]\s*", cleaned_line)
+        if len(split_segments) > 1:
+            lines.extend(segment.strip(" -\t") for segment in split_segments if segment.strip(" -\t"))
+
+    deduped = []
+    seen = set()
+    for line in lines:
+        canonical = _canonical_keyword(line)
+        if not canonical or canonical in seen:
+            continue
+        seen.add(canonical)
+        deduped.append(line)
+
+    cleaned = [line for line in deduped if len(line.split()) >= 2]
+    return cleaned[:limit] if cleaned else _extract_resume_lines(text, limit=limit)
+
+
 def _build_resume_analysis_payload(text: str, file_name: str = "") -> dict:
     normalized = _normalize_resume_text(text)
-    lines = _extract_resume_lines(text, limit=20)
+    lines = _extract_resume_lines_smart(text, limit=20)
     skills = _extract_resume_skills(text)
     signal_details = _resume_signal_details(text, file_name)
 
@@ -568,6 +618,148 @@ def _extract_job_keywords(job_description: str) -> list[str]:
         seen.add(canonical)
         deduped.append(item)
     return deduped[:16]
+
+
+def _split_job_description_lines(job_description: str) -> list[str]:
+    if not job_description:
+        return []
+
+    normalized_newlines = re.sub(r"[\r\f]+", "\n", job_description)
+    seeded_lines = []
+    for block in normalized_newlines.split("\n"):
+        block = re.sub(r"\s+", " ", block).strip(" -\t")
+        if not block:
+            continue
+        seeded_lines.append(block)
+
+        bullet_splits = re.split(r"\s*[•·▪◦]\s+|\s+-\s+|\s+\*\s+", block)
+        if len(bullet_splits) > 1:
+            seeded_lines.extend(item.strip(" -\t") for item in bullet_splits if item.strip(" -\t"))
+
+    deduped = []
+    seen = set()
+    for line in seeded_lines:
+        canonical = _canonical_keyword(line)
+        if not canonical or canonical in seen:
+            continue
+        seen.add(canonical)
+        deduped.append(line)
+    return deduped[:120]
+
+
+def _extract_job_requirement_items(job_description: str, patterns: list[str], limit: int = 6) -> list[str]:
+    lines = _split_job_description_lines(job_description)
+    results = []
+    seen = set()
+
+    for line in lines:
+        lowered = line.lower()
+        if len(lowered.split()) < 2:
+            continue
+        if not any(re.search(pattern, lowered, re.I) for pattern in patterns):
+            continue
+        canonical = _canonical_keyword(line)
+        if canonical in seen:
+            continue
+        seen.add(canonical)
+        results.append(line)
+        if len(results) >= limit:
+            break
+
+    return results
+
+
+def _extract_job_requirement_skills(job_description: str) -> tuple[list[str], list[str], list[str]]:
+    lines = _split_job_description_lines(job_description)
+    all_keywords = _extract_job_keywords(job_description)
+    required, preferred, tools = [], [], []
+    req_seen, pref_seen, tool_seen = set(), set(), set()
+
+    for line in lines:
+        lowered = line.lower()
+        line_keywords = []
+        for keyword in all_keywords:
+            canonical = _canonical_keyword(keyword)
+            if canonical and canonical in _canonical_keyword(line):
+                line_keywords.append(keyword)
+
+        is_preferred = bool(re.search(r"\b(preferred|nice to have|plus|good to have)\b", lowered))
+        is_required = bool(
+            re.search(r"\b(requirements?|must have|required|qualification|looking for|responsibilities)\b", lowered)
+        ) or not is_preferred
+
+        for keyword in line_keywords:
+            canonical = _canonical_keyword(keyword)
+            if keyword.lower() in {"agile", "scrum", "git", "linux", "aws", "azure", "gcp", "docker", "kubernetes"}:
+                if canonical not in tool_seen:
+                    tool_seen.add(canonical)
+                    tools.append(keyword)
+
+            if is_preferred:
+                if canonical not in pref_seen:
+                    pref_seen.add(canonical)
+                    preferred.append(keyword)
+            elif is_required and canonical not in req_seen:
+                req_seen.add(canonical)
+                required.append(keyword)
+
+    if not required:
+        required = all_keywords[:8]
+    if not tools:
+        tools = [item for item in required if item in {"AWS", "Azure", "Gcp", "Docker", "Kubernetes", "Git", "Linux"}][:6]
+
+    return required[:10], preferred[:8], tools[:8]
+
+
+def _build_job_requirements_payload(job_description: str) -> dict:
+    normalized_job = _normalize_resume_text(job_description)
+    if not normalized_job:
+        return {
+            "job_description_provided": False,
+            "required_skills": [],
+            "preferred_skills": [],
+            "education_requirements": [],
+            "experience_requirements": [],
+            "certifications": [],
+            "responsibilities": [],
+            "tools_and_platforms": [],
+            "summary": "Add a target job description to extract required skills, education, experience, and other role requirements.",
+        }
+
+    required_skills, preferred_skills, tools_and_platforms = _extract_job_requirement_skills(normalized_job)
+    education_requirements = _extract_job_requirement_items(normalized_job, JOB_EDUCATION_PATTERNS, limit=4)
+    experience_requirements = _extract_job_requirement_items(normalized_job, JOB_EXPERIENCE_PATTERNS, limit=5)
+    certifications = _extract_job_requirement_items(normalized_job, JOB_CERTIFICATION_PATTERNS, limit=4)
+    responsibilities = _extract_job_requirement_items(
+        normalized_job,
+        [
+            r"\b(responsible|responsibilities|build|develop|design|lead|manage|analyze|collaborate|deliver|maintain|support)\b",
+        ],
+        limit=6,
+    )
+
+    summary_parts = []
+    if required_skills:
+        summary_parts.append(f"Key skills: {', '.join(required_skills[:4])}.")
+    if education_requirements:
+        summary_parts.append(f"Education: {education_requirements[0]}.")
+    if experience_requirements:
+        summary_parts.append(f"Experience: {experience_requirements[0]}.")
+    if certifications:
+        summary_parts.append(f"Certifications: {certifications[0]}.")
+
+    return {
+        "job_description_provided": True,
+        "required_skills": required_skills[:10],
+        "preferred_skills": preferred_skills[:8],
+        "education_requirements": education_requirements,
+        "experience_requirements": experience_requirements,
+        "certifications": certifications,
+        "responsibilities": responsibilities,
+        "tools_and_platforms": tools_and_platforms[:8],
+        "summary": " ".join(summary_parts).strip()
+        or "The job description was read successfully, but only broad role requirements could be extracted.",
+    }
 
 
 def _is_valid_job_description(job_description: str) -> bool:
@@ -793,13 +985,74 @@ def _build_job_match_payload(resume_text: str, job_description: str) -> dict:
     }
 
 
+def _missing_required_skills(analysis: dict, job_requirements: dict) -> list[str]:
+    required_skills = job_requirements.get("required_skills") or []
+    resume_skill_index = {_canonical_keyword(skill) for skill in analysis.get("skills") or []}
+    return [
+        skill for skill in required_skills if _canonical_keyword(skill) not in resume_skill_index
+    ][:8]
+
+
+def _resume_specific_edit_actions(
+    analysis: dict,
+    quality: dict,
+    match_payload: dict,
+    job_requirements: dict,
+) -> list[str]:
+    actions = []
+    missing_required = _missing_required_skills(analysis, job_requirements)
+
+    if missing_required:
+        actions.append(
+            "Add or strengthen proof for required skills such as "
+            + ", ".join(missing_required[:4])
+            + " in your skills section or project bullets."
+        )
+
+    if not analysis.get("project_highlights"):
+        actions.append(
+            "Add at least one project entry with the tech stack, what you built, and the result or impact."
+        )
+    else:
+        actions.append(
+            "Rewrite your strongest project bullet to include the tool used, the feature delivered, and a measurable result."
+        )
+
+    if quality.get("numeric_mentions", 0) < 2:
+        actions.append(
+            "Add numbers to your best bullets, such as users reached, features delivered, performance gains, rankings, or completion counts."
+        )
+
+    if not quality.get("contact_checks", {}).get("profile_link"):
+        actions.append(
+            "Place your LinkedIn or GitHub link in the header so recruiters can verify your work quickly."
+        )
+
+    if match_payload.get("missing_keywords"):
+        actions.append(
+            "Mirror important job-description wording like "
+            + ", ".join(match_payload["missing_keywords"][:4])
+            + " where it truthfully matches your work."
+        )
+
+    return actions[:6]
+
+
 def _build_resume_recommendations(
     analysis: dict,
     scorecard: dict,
     match_payload: dict,
     spelling_payload: dict,
+    job_requirements: dict,
+    quality: dict,
 ) -> list[str]:
     recommendations = []
+    targeted_actions = _resume_specific_edit_actions(
+        analysis,
+        quality,
+        match_payload,
+        job_requirements,
+    )
 
     if not analysis.get("contact_found"):
         recommendations.append("Add a clear email address or phone number near the top of your resume.")
@@ -825,10 +1078,14 @@ def _build_resume_recommendations(
             "Fix spelling issues such as " + flagged_words + " to improve professionalism and ATS trust."
         )
 
+    recommendations.extend(
+        action for action in targeted_actions if action not in recommendations
+    )
+
     if not recommendations:
         recommendations.append("Your resume looks solid. Focus next on quantifying achievements for an even stronger profile.")
 
-    return recommendations[:5]
+    return recommendations[:6]
 
 
 def _build_resume_quality_payload(
@@ -836,6 +1093,7 @@ def _build_resume_quality_payload(
     analysis: dict,
     scorecard: dict,
     match_payload: dict,
+    job_requirements: dict,
     file_name: str = "",
 ) -> dict:
     details = _resume_signal_details(text, file_name)
@@ -882,6 +1140,7 @@ def _build_resume_quality_payload(
     )
 
     strengths = []
+    missing_required = _missing_required_skills(analysis, job_requirements)
     if details["has_email"] and details["has_phone"]:
         strengths.append("Strong contact visibility with both email and phone detected.")
     if details["has_profile_link"]:
@@ -898,6 +1157,8 @@ def _build_resume_quality_payload(
             + ", ".join(match_payload["matched_keywords"][:3])
             + "."
         )
+    if not missing_required and job_requirements.get("required_skills"):
+        strengths.append("The resume already covers most of the core required skills from the target job.")
 
     improvement_areas = []
     if missing_sections:
@@ -916,6 +1177,12 @@ def _build_resume_quality_payload(
             + ", ".join(match_payload["missing_keywords"][:4])
             + "."
         )
+    if missing_required:
+        improvement_areas.append(
+            "Show clearer evidence for required skills such as "
+            + ", ".join(missing_required[:4])
+            + "."
+        )
 
     must_add = []
     if not details["has_email"]:
@@ -930,6 +1197,8 @@ def _build_resume_quality_payload(
         must_add.append("A stronger skills section aligned with the target job")
     if numeric_mentions < 2:
         must_add.append("Quantified achievements like percentages, counts, or savings")
+    if missing_required:
+        must_add.append("Evidence of the most important required skills through projects, internships, or experience bullets")
 
     return {
         "ats_score": ats_score,
@@ -951,12 +1220,21 @@ def _build_resume_quality_payload(
     }
 
 
-def _build_role_focus_payload(match_payload: dict, quality: dict, spelling_payload: dict) -> dict:
+def _build_role_focus_payload(match_payload: dict, quality: dict, spelling_payload: dict, job_requirements: dict | None = None) -> dict:
     target_keywords = match_payload.get("job_keywords") or []
     missing_keywords = match_payload.get("missing_keywords") or []
     matched_keywords = match_payload.get("matched_keywords") or []
+    job_requirements = job_requirements or {}
+    missing_required = [
+        skill for skill in (job_requirements.get("required_skills") or [])
+        if _canonical_keyword(skill) not in {_canonical_keyword(item) for item in matched_keywords}
+    ]
 
     where_to_improve = []
+    if missing_required:
+        where_to_improve.append(
+            "Add direct evidence for required skills such as " + ", ".join(missing_required[:4]) + "."
+        )
     if missing_keywords:
         where_to_improve.append(
             "Add proof for target-role keywords such as " + ", ".join(missing_keywords[:4]) + "."
@@ -982,7 +1260,7 @@ def _resume_ai_text(value, fallback: str = "") -> str:
     if value is None:
         return fallback
     if isinstance(value, str):
-        cleaned = _normalize_resume_text(value)
+        cleaned = _normalize_resume_text(re.sub(r"[*_`#]+", "", value))
         return cleaned or fallback
     if isinstance(value, (int, float, bool)):
         cleaned = _normalize_resume_text(str(value))
@@ -997,9 +1275,9 @@ def _resume_ai_text(value, fallback: str = "") -> str:
             or value.get("label")
         )
         if preferred is not None:
-            cleaned = _normalize_resume_text(str(preferred))
+            cleaned = _normalize_resume_text(re.sub(r"[*_`#]+", "", str(preferred)))
             return cleaned or fallback
-    cleaned = _normalize_resume_text(str(value))
+    cleaned = _normalize_resume_text(re.sub(r"[*_`#]+", "", str(value)))
     return cleaned or fallback
 
 
@@ -1022,6 +1300,16 @@ def _resume_ai_list(value, fallback=None, limit: int = 10) -> list[str]:
             break
 
     return cleaned or list(fallback)[:limit]
+
+
+def _resume_ai_prefer_richer_list(primary, fallback=None, limit: int = 10) -> list[str]:
+    primary_list = _resume_ai_list(primary, [], limit)
+    fallback_list = _resume_ai_list(fallback, [], limit)
+    if len(primary_list) >= max(2, min(4, len(fallback_list) or 2)):
+        return primary_list[:limit]
+    if fallback_list and len(fallback_list) > len(primary_list):
+        return fallback_list[:limit]
+    return primary_list[:limit] or fallback_list[:limit]
 
 
 def _resume_ai_bool(value, fallback: bool = False) -> bool:
@@ -1123,6 +1411,51 @@ def _resume_ai_weak_areas(value, fallback=None) -> list[dict]:
     return weak_areas or list(fallback)[:4]
 
 
+def _resume_ai_response_is_degenerate(
+    scorecard: dict,
+    match_payload: dict,
+    quality: dict,
+    analysis: dict,
+    fallback_quality: dict,
+) -> bool:
+    zeroish_scores = all(
+        _resume_ai_score(scorecard.get(key), 0) == 0
+        for key in ("resume_score", "structure_score", "content_score")
+    ) and _resume_ai_score(match_payload.get("match_score"), 0) == 0 and _resume_ai_score(
+        quality.get("ats_score"), 0
+    ) == 0
+
+    ai_text = " ".join(
+        [
+            _resume_ai_text(analysis.get("analysis_text"), ""),
+            _resume_ai_text(match_payload.get("summary"), ""),
+            " ".join(_resume_ai_list(quality.get("improvement_areas"), [], 6)),
+            " ".join(_resume_ai_list(quality.get("must_add"), [], 6)),
+        ]
+    ).lower()
+
+    claims_unreadable = any(
+        phrase in ai_text
+        for phrase in [
+            "unreadable",
+            "cannot be processed",
+            "cannot verify",
+            "garbled",
+            "no sections detected clearly",
+        ]
+    )
+
+    fallback_has_content = (
+        int(fallback_quality.get("word_count") or 0) >= 150
+        or bool(fallback_quality.get("detected_sections"))
+        or bool((analysis.get("skills") or []))
+        or bool((analysis.get("education") or []))
+        or bool((analysis.get("experience_highlights") or []))
+    )
+
+    return zeroish_scores or (claims_unreadable and fallback_has_content)
+
+
 def _build_resume_gemini_prompt(resume_text: str, job_description: str, file_name: str = "") -> str:
     trimmed_resume = resume_text[:12000]
     trimmed_job = job_description[:6000]
@@ -1136,6 +1469,31 @@ Do not invent facts that are not supported by the resume or the job description.
 If something is unclear, use conservative wording.
 All scores must be integers from 0 to 100.
 Keep lists concise and actionable.
+Think like a strong recruiter plus ATS reviewer:
+- Score based on evidence, not generic harshness.
+- A decent student or fresher resume should not be scored unrealistically low if it has clear sections, real projects, education, and contact details.
+- Do not punish the candidate for lacking senior-level experience if the resume appears to be for a fresher or student.
+- Use the job description to judge alignment, but do not claim missing experience that the job description itself does not require.
+- Recommendations must be concrete resume edits, not vague career advice.
+- When suggesting improvements, prefer things the candidate can actually add or rewrite in the resume.
+
+Use this scoring rubric:
+- `resume_score`: overall recruiter quality of the current draft.
+- `structure_score`: formatting logic, section clarity, scanability, and completeness.
+- `content_score`: relevance and strength of skills, projects, education, and experience evidence.
+- `ats_score`: weighted ATS/readability score based on section completeness, keyword alignment, contact visibility, and proof of impact.
+- `impact_score`: strength of measurable outcomes, achievements, ownership, and action verbs.
+- `match_score`: alignment to the target role, based only on the provided job description.
+
+Recommendation quality rules:
+- `strengths` must mention what is genuinely working in the current resume.
+- `improvement_areas` must identify the real gaps.
+- `must_add` should contain only the highest-priority missing items.
+- `recommendations` must read like specific edit instructions, for example:
+  "Add a 2-line skills section with Python, React, SQL, and Git near the top."
+  "Rewrite the Chrome extension project bullet to mention users, results, or performance impact."
+  "Move LinkedIn and GitHub into the header so recruiters can see them immediately."
+- Prefer direct, useful advice about sections, bullets, keywords, metrics, projects, education, and role fit.
 
 Return this JSON shape exactly:
 {{
@@ -1150,6 +1508,17 @@ Return this JSON shape exactly:
     "resume_signal_score": 0,
     "analysis_text": "string",
     "suggested_roles": ["string"]
+  }},
+  "job_requirements": {{
+    "job_description_provided": true,
+    "required_skills": ["string"],
+    "preferred_skills": ["string"],
+    "education_requirements": ["string"],
+    "experience_requirements": ["string"],
+    "certifications": ["string"],
+    "responsibilities": ["string"],
+    "tools_and_platforms": ["string"],
+    "summary": "string"
   }},
   "scorecard": {{
     "resume_score": 0,
@@ -1224,6 +1593,7 @@ async def _generate_resume_payload_with_ai(
         provider_used = "ollama"
 
     fallback_analysis = fallback_payload["analysis"]
+    fallback_job_requirements = fallback_payload["job_requirements"]
     fallback_scorecard = fallback_payload["scorecard"]
     fallback_match = fallback_payload["match"]
     fallback_spelling = fallback_payload["spelling"]
@@ -1233,6 +1603,7 @@ async def _generate_resume_payload_with_ai(
     fallback_recommendations = fallback_payload["recommendations"]
 
     ai_analysis = ai_payload.get("analysis") if isinstance(ai_payload.get("analysis"), dict) else {}
+    ai_job_requirements = ai_payload.get("job_requirements") if isinstance(ai_payload.get("job_requirements"), dict) else {}
     ai_scorecard = ai_payload.get("scorecard") if isinstance(ai_payload.get("scorecard"), dict) else {}
     ai_match = ai_payload.get("match") if isinstance(ai_payload.get("match"), dict) else {}
     ai_spelling = ai_payload.get("spelling") if isinstance(ai_payload.get("spelling"), dict) else {}
@@ -1242,27 +1613,70 @@ async def _generate_resume_payload_with_ai(
 
     analysis = {
         "candidate_name": _resume_ai_text(ai_analysis.get("candidate_name"), fallback_analysis.get("candidate_name", "")),
-        "skills": _resume_ai_list(ai_analysis.get("skills"), fallback_analysis.get("skills") or [], 24),
-        "education": _resume_ai_list(ai_analysis.get("education"), fallback_analysis.get("education") or [], 5),
-        "experience_highlights": _resume_ai_list(
+        "skills": _resume_ai_prefer_richer_list(ai_analysis.get("skills"), fallback_analysis.get("skills") or [], 24),
+        "education": _resume_ai_prefer_richer_list(ai_analysis.get("education"), fallback_analysis.get("education") or [], 5),
+        "experience_highlights": _resume_ai_prefer_richer_list(
             ai_analysis.get("experience_highlights"),
             fallback_analysis.get("experience_highlights") or [],
             6,
         ),
-        "project_highlights": _resume_ai_list(
+        "project_highlights": _resume_ai_prefer_richer_list(
             ai_analysis.get("project_highlights"),
             fallback_analysis.get("project_highlights") or [],
             6,
         ),
         "contact_found": _resume_ai_bool(ai_analysis.get("contact_found"), fallback_analysis.get("contact_found", False)),
-        "section_hits": _resume_ai_list(ai_analysis.get("section_hits"), fallback_analysis.get("section_hits") or [], 12),
+        "section_hits": _resume_ai_prefer_richer_list(ai_analysis.get("section_hits"), fallback_analysis.get("section_hits") or [], 12),
         "resume_signal_score": _resume_ai_score(
             ai_analysis.get("resume_signal_score"),
             int(fallback_analysis.get("resume_signal_score") or 0),
         ),
         "analysis_text": _resume_ai_text(ai_analysis.get("analysis_text"), fallback_analysis.get("analysis_text", "")),
-        "suggested_roles": _resume_ai_list(ai_analysis.get("suggested_roles"), fallback_analysis.get("suggested_roles") or [], 4),
+        "suggested_roles": _resume_ai_prefer_richer_list(ai_analysis.get("suggested_roles"), fallback_analysis.get("suggested_roles") or [], 4),
         "source_file_name": file_name,
+    }
+
+    job_requirements = {
+        "job_description_provided": True,
+        "required_skills": _resume_ai_prefer_richer_list(
+            ai_job_requirements.get("required_skills"),
+            fallback_job_requirements.get("required_skills") or [],
+            10,
+        ),
+        "preferred_skills": _resume_ai_prefer_richer_list(
+            ai_job_requirements.get("preferred_skills"),
+            fallback_job_requirements.get("preferred_skills") or [],
+            8,
+        ),
+        "education_requirements": _resume_ai_prefer_richer_list(
+            ai_job_requirements.get("education_requirements"),
+            fallback_job_requirements.get("education_requirements") or [],
+            5,
+        ),
+        "experience_requirements": _resume_ai_prefer_richer_list(
+            ai_job_requirements.get("experience_requirements"),
+            fallback_job_requirements.get("experience_requirements") or [],
+            6,
+        ),
+        "certifications": _resume_ai_prefer_richer_list(
+            ai_job_requirements.get("certifications"),
+            fallback_job_requirements.get("certifications") or [],
+            5,
+        ),
+        "responsibilities": _resume_ai_prefer_richer_list(
+            ai_job_requirements.get("responsibilities"),
+            fallback_job_requirements.get("responsibilities") or [],
+            6,
+        ),
+        "tools_and_platforms": _resume_ai_prefer_richer_list(
+            ai_job_requirements.get("tools_and_platforms"),
+            fallback_job_requirements.get("tools_and_platforms") or [],
+            8,
+        ),
+        "summary": _resume_ai_text(
+            ai_job_requirements.get("summary"),
+            fallback_job_requirements.get("summary", ""),
+        ),
     }
 
     scorecard = {
@@ -1274,9 +1688,9 @@ async def _generate_resume_payload_with_ai(
     match_payload = {
         "job_description_provided": True,
         "match_score": _resume_ai_score(ai_match.get("match_score"), fallback_match.get("match_score", 0) or 0),
-        "matched_keywords": _resume_ai_list(ai_match.get("matched_keywords"), fallback_match.get("matched_keywords") or [], 8),
-        "missing_keywords": _resume_ai_list(ai_match.get("missing_keywords"), fallback_match.get("missing_keywords") or [], 8),
-        "job_keywords": _resume_ai_list(ai_match.get("job_keywords"), fallback_match.get("job_keywords") or [], 16),
+        "matched_keywords": _resume_ai_prefer_richer_list(ai_match.get("matched_keywords"), fallback_match.get("matched_keywords") or [], 8),
+        "missing_keywords": _resume_ai_prefer_richer_list(ai_match.get("missing_keywords"), fallback_match.get("missing_keywords") or [], 8),
+        "job_keywords": _resume_ai_prefer_richer_list(ai_match.get("job_keywords"), fallback_match.get("job_keywords") or [], 16),
         "summary": _resume_ai_text(ai_match.get("summary"), fallback_match.get("summary", "")),
     }
 
@@ -1304,13 +1718,13 @@ async def _generate_resume_payload_with_ai(
         "detected_sections": fallback_quality.get("detected_sections") or [],
         "missing_sections": fallback_quality.get("missing_sections") or [],
         "contact_checks": fallback_quality.get("contact_checks") or {},
-        "strengths": _resume_ai_list(ai_quality.get("strengths"), fallback_quality.get("strengths") or [], 6),
-        "improvement_areas": _resume_ai_list(
+        "strengths": _resume_ai_prefer_richer_list(ai_quality.get("strengths"), fallback_quality.get("strengths") or [], 6),
+        "improvement_areas": _resume_ai_prefer_richer_list(
             ai_quality.get("improvement_areas"),
             fallback_quality.get("improvement_areas") or [],
             6,
         ),
-        "must_add": _resume_ai_list(ai_quality.get("must_add"), fallback_quality.get("must_add") or [], 6),
+        "must_add": _resume_ai_prefer_richer_list(ai_quality.get("must_add"), fallback_quality.get("must_add") or [], 6),
     }
 
     dashboard = _build_dashboard_payload(scorecard, quality, match_payload, spelling_payload)
@@ -1320,35 +1734,53 @@ async def _generate_resume_payload_with_ai(
             "weak_areas": _resume_ai_weak_areas(ai_dashboard.get("weak_areas"), dashboard.get("weak_areas") or []),
         }
 
-    role_focus = _build_role_focus_payload(match_payload, quality, spelling_payload)
+    role_focus = _build_role_focus_payload(match_payload, quality, spelling_payload, job_requirements)
     if ai_role_focus:
         role_focus = {
-            "target_keywords": _resume_ai_list(
+            "target_keywords": _resume_ai_prefer_richer_list(
                 ai_role_focus.get("target_keywords"),
                 role_focus.get("target_keywords") or [],
                 10,
             ),
-            "matched_keywords": _resume_ai_list(
+            "matched_keywords": _resume_ai_prefer_richer_list(
                 ai_role_focus.get("matched_keywords"),
                 role_focus.get("matched_keywords") or [],
                 8,
             ),
-            "missing_keywords": _resume_ai_list(
+            "missing_keywords": _resume_ai_prefer_richer_list(
                 ai_role_focus.get("missing_keywords"),
                 role_focus.get("missing_keywords") or [],
                 8,
             ),
-            "where_to_improve": _resume_ai_list(
+            "where_to_improve": _resume_ai_prefer_richer_list(
                 ai_role_focus.get("where_to_improve"),
                 role_focus.get("where_to_improve") or [],
                 5,
             ),
         }
 
-    recommendations = _resume_ai_list(ai_payload.get("recommendations"), fallback_recommendations, 6)
+    recommendations = _resume_ai_prefer_richer_list(ai_payload.get("recommendations"), fallback_recommendations, 6)
+
+    if _resume_ai_response_is_degenerate(
+        scorecard,
+        match_payload,
+        quality,
+        analysis,
+        fallback_quality,
+    ):
+        analysis = fallback_analysis
+        job_requirements = fallback_job_requirements
+        scorecard = fallback_scorecard
+        match_payload = fallback_match
+        spelling_payload = fallback_spelling
+        quality = fallback_quality
+        dashboard = fallback_dashboard
+        role_focus = fallback_role_focus
+        recommendations = fallback_recommendations
 
     return {
         "analysis": analysis,
+        "job_requirements": job_requirements,
         "scorecard": scorecard,
         "match": match_payload,
         "spelling": spelling_payload,
@@ -1748,29 +2180,31 @@ async def analyze_resume(
             detail="Please provide a valid job description with enough detail so the resume can be analyzed against the target role.",
         )
 
-    extracted_text = _normalize_resume_text(resume_text)
-    if not extracted_text and resume_data_url:
+    structured_resume_text = resume_text or ""
+    if not _normalize_resume_text(structured_resume_text) and resume_data_url:
         pdf_bytes = _decode_pdf_data_url(resume_data_url)
         if not pdf_bytes:
             raise HTTPException(status_code=400, detail="The uploaded resume could not be decoded.")
-        extracted_text = _extract_pdf_text_from_bytes(pdf_bytes)
+        structured_resume_text = _extract_pdf_text_from_bytes(pdf_bytes)
 
-    extracted_text = _normalize_resume_text(extracted_text)
-    if not extracted_text:
+    normalized_resume_text = _normalize_resume_text(structured_resume_text)
+    if not normalized_resume_text:
         raise HTTPException(
             status_code=400,
             detail="We could not read text from this PDF. Try a text-based resume PDF instead of a scanned image.",
         )
 
-    fallback_analysis = _build_resume_analysis_payload(extracted_text, file_name)
-    fallback_scorecard = _build_resume_scorecard(extracted_text, file_name)
-    fallback_match_payload = _build_job_match_payload(extracted_text, job_description)
-    fallback_spelling_payload = _build_spelling_payload(extracted_text, fallback_match_payload)
+    fallback_analysis = _build_resume_analysis_payload(structured_resume_text, file_name)
+    fallback_job_requirements = _build_job_requirements_payload(job_description)
+    fallback_scorecard = _build_resume_scorecard(normalized_resume_text, file_name)
+    fallback_match_payload = _build_job_match_payload(normalized_resume_text, job_description)
+    fallback_spelling_payload = _build_spelling_payload(normalized_resume_text, fallback_match_payload)
     fallback_quality = _build_resume_quality_payload(
-        extracted_text,
+        structured_resume_text,
         fallback_analysis,
         fallback_scorecard,
         fallback_match_payload,
+        fallback_job_requirements,
         file_name,
     )
     fallback_dashboard = _build_dashboard_payload(
@@ -1783,16 +2217,20 @@ async def analyze_resume(
         fallback_match_payload,
         fallback_quality,
         fallback_spelling_payload,
+        fallback_job_requirements,
     )
     fallback_recommendations = _build_resume_recommendations(
         fallback_analysis,
         fallback_scorecard,
         fallback_match_payload,
         fallback_spelling_payload,
+        fallback_job_requirements,
+        fallback_quality,
     )
 
     fallback_payload = {
         "analysis": fallback_analysis,
+        "job_requirements": fallback_job_requirements,
         "scorecard": fallback_scorecard,
         "match": fallback_match_payload,
         "spelling": fallback_spelling_payload,
@@ -1811,12 +2249,13 @@ async def analyze_resume(
 
     try:
         generated_payload, provider_used, provider_error = await _generate_resume_payload_with_ai(
-            extracted_text,
+            structured_resume_text,
             job_description,
             file_name,
             fallback_payload,
         )
         analysis = generated_payload["analysis"]
+        job_requirements = generated_payload["job_requirements"]
         scorecard = generated_payload["scorecard"]
         match_payload = generated_payload["match"]
         spelling_payload = generated_payload["spelling"]
@@ -1830,6 +2269,7 @@ async def analyze_resume(
         provider_meta["provider_error"] = provider_error
     except ProviderError as exc:
         analysis = fallback_analysis
+        job_requirements = fallback_job_requirements
         scorecard = fallback_scorecard
         match_payload = fallback_match_payload
         spelling_payload = fallback_spelling_payload
@@ -1844,8 +2284,9 @@ async def analyze_resume(
 
     return {
         "status": "RESUME_ANALYZED",
-        "resume_text": extracted_text,
+        "resume_text": normalized_resume_text,
         "analysis": analysis,
+        "job_requirements": job_requirements,
         "scorecard": scorecard,
         "match": match_payload,
         "dashboard": dashboard,

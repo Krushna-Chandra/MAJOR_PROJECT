@@ -187,7 +187,7 @@ function ResumeAnalyzer() {
               <h1>Upload your resume. See what is weak. Leave with a sharper draft.</h1>
               <p>
                 This analyzer is built like a focused workspace, not a typical
-                app form. Upload your PDF, preview it instantly, add an optional
+                app form. Upload your PDF, preview it instantly, add the target
                 job description, and get a full review once the report is ready.
               </p>
 
@@ -195,8 +195,8 @@ function ResumeAnalyzer() {
                 {quickChecks.map((item) => (
                   <article key={item.title} className="resume-studio-quick-card">
                     <div className="resume-studio-quick-icon">{item.icon}</div>
-                    <strong>{item.title}</strong>
-                    <p>{item.body}</p>
+                <strong>{item.title}</strong>
+                <p>{item.body}</p>
                   </article>
                 ))}
               </div>
@@ -296,7 +296,7 @@ function ResumeAnalyzer() {
                 onChange={(event) => setJobDescription(event.target.value)}
               />
               <small className="resume-studio-field-note">
-                A valid job description is required for role-based scoring, weak-area analysis, and spelling checks.
+                Paste the full job description. The analyzer uses it to extract required skills, education, experience, role-fit gaps, and ATS keywords.
               </small>
             </div>
 
@@ -304,7 +304,7 @@ function ResumeAnalyzer() {
               <button
                 className="resume-studio-btn is-primary"
                 onClick={analyzeResume}
-                disabled={!resumeDataUrl || loading}
+                disabled={!resumeDataUrl || loading || !isValidJobDescription(jobDescription)}
               >
                 {loading ? (
                   <>
@@ -382,9 +382,9 @@ function ResumeAnalyzer() {
               <h3>One clean path from raw PDF to final feedback.</h3>
               <ol className="resume-studio-timeline">
                 <li>Upload your resume and verify the preview.</li>
-                <li>Optionally add a target job description.</li>
+                <li>Paste the target job description you want to match.</li>
                 <li>Run analysis and wait for the completed report.</li>
-                <li>Review weaknesses, missing items, and stronger bullet ideas.</li>
+                <li>Review required skills, education, weak areas, and stronger bullet ideas.</li>
               </ol>
             </section>
 

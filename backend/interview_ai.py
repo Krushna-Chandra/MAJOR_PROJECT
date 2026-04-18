@@ -280,6 +280,31 @@ def _extract_json_block(text: str) -> Dict[str, Any]:
     raise ProviderError("Provider did not return valid JSON.")
 
 
+def _extract_gemini_text(data: Dict[str, Any]) -> str:
+    candidates = data.get("candidates") or []
+    collected = []
+
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        content = candidate.get("content") or {}
+        parts = content.get("parts") or []
+        for part in parts:
+            if isinstance(part, dict) and part.get("text"):
+                collected.append(str(part["text"]))
+
+    text = "".join(collected).strip()
+    if text:
+        return text
+
+    prompt_feedback = data.get("promptFeedback") or {}
+    block_reason = prompt_feedback.get("blockReason")
+    if block_reason:
+        raise ProviderError(f"Gemini blocked the request: {block_reason}")
+
+    raise ProviderError("Gemini returned no text content.")
+
+
 def _normalize_text(value: str) -> str:
     return re.sub(r"\s+", " ", (value or "").strip())
 
@@ -724,21 +749,42 @@ async def _call_gemini_json(
         f"https://generativelanguage.googleapis.com/v1beta/models/"
         f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
     )
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "temperature": temperature,
-            "response_mime_type": "application/json",
+    attempts = [
+        {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": temperature,
+                "response_mime_type": "application/json",
+            },
         },
-    }
-    data = await asyncio.to_thread(_http_post_json, url, payload, None, timeout_seconds or 80)
-    parts = (
-        data.get("candidates", [{}])[0]
-        .get("content", {})
-        .get("parts", [])
-    )
-    text = "".join(part.get("text", "") for part in parts)
-    return _extract_json_block(text)
+        {
+            "contents": [
+                {
+                    "parts": [
+                        {
+                            "text": (
+                                f"{prompt}\n\nReturn one JSON object only. No markdown, no comments, no prose."
+                            )
+                        }
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "temperature": min(temperature, 0.2),
+            },
+        },
+    ]
+
+    errors = []
+    for payload in attempts:
+        try:
+            data = await asyncio.to_thread(_http_post_json, url, payload, None, timeout_seconds or 80)
+            text = _extract_gemini_text(data)
+            return _extract_json_block(text)
+        except ProviderError as exc:
+            errors.append(str(exc))
+
+    raise ProviderError(" | ".join(errors))
 
 
 async def _call_ollama_json(

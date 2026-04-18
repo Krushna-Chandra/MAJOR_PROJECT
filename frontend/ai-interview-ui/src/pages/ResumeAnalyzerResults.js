@@ -64,8 +64,89 @@ function displayScore(value) {
   return Number.isFinite(numeric) ? Math.round(numeric) : "--";
 }
 
-function uniqueList(items = []) {
-  return Array.from(new Set((items || []).filter(Boolean)));
+function canonicalValue(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9+#.\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function smartUniqueList(items = []) {
+  const seen = new Set();
+  const output = [];
+
+  (items || []).forEach((item) => {
+    const cleaned = String(item || "").trim();
+    const key = canonicalValue(cleaned);
+    if (!cleaned || !key || seen.has(key)) return;
+    seen.add(key);
+    output.push(cleaned);
+  });
+
+  return output;
+}
+
+function averageScores(values = []) {
+  const valid = values.filter((value) => Number.isFinite(value));
+  if (!valid.length) return 0;
+  return clampScore(valid.reduce((sum, value) => sum + value, 0) / valid.length);
+}
+
+function normalizeSections(result) {
+  const rawDetected = smartUniqueList([
+    ...(result.quality?.detected_sections || []),
+    ...(result.analysis?.detected_sections || []),
+    ...(result.analysis?.sections || []),
+  ]);
+
+  const detectedMap = new Map(rawDetected.map((item) => [canonicalValue(item), item]));
+  const extractedSkills = smartUniqueList([
+    ...(result.analysis?.skills || []),
+    ...(result.analysis?.technical_skills || []),
+    ...(result.analysis?.tools || []),
+  ]);
+  const projects = smartUniqueList(result.analysis?.project_highlights || []);
+  const education = smartUniqueList(result.analysis?.education || []);
+  const experience = smartUniqueList(result.analysis?.experience_highlights || []);
+
+  if (extractedSkills.length) detectedMap.set("skills", "Skills");
+  if (projects.length) detectedMap.set("projects", "Projects");
+  if (education.length) detectedMap.set("education", "Education");
+  if (experience.length) detectedMap.set("experience", "Experience");
+
+  const canonicalDetected = new Set(detectedMap.keys());
+  const canonicalTargets = ["skills", "projects", "experience", "education"];
+  const detectedSections = canonicalTargets
+    .filter((section) => canonicalDetected.has(section))
+    .map((section) => detectedMap.get(section) || section.charAt(0).toUpperCase() + section.slice(1));
+
+  const missingSections = smartUniqueList(
+    canonicalTargets
+      .filter((section) => !canonicalDetected.has(section))
+      .map((section) => section.charAt(0).toUpperCase() + section.slice(1))
+  );
+
+  return { detectedSections, missingSections };
+}
+
+function buildRoleSummary(result, hasJobDescription, matchedKeywords, missingKeywords) {
+  if (!hasJobDescription) {
+    return "Attach a job description to get stronger role-fit and missing keyword guidance.";
+  }
+  if (result.match?.summary) {
+    return result.match.summary;
+  }
+  if (matchedKeywords.length && missingKeywords.length) {
+    return `Your resume already reflects ${matchedKeywords.length} role keywords, but ${missingKeywords.length} important skills or terms are still missing.`;
+  }
+  if (matchedKeywords.length) {
+    return "Your resume is showing useful overlap with the target role. Strengthen that match with clearer project evidence.";
+  }
+  if (missingKeywords.length) {
+    return "The resume has relevant content, but it is not clearly aligned to the language of the target job description yet.";
+  }
+  return "We found limited comparison information. Try using a fuller job description for a clearer match readout.";
 }
 
 function getScoreTone(score) {
@@ -184,15 +265,77 @@ function HighlightBlock({ title, items = [], emptyText }) {
 
 function ResumeAnalyzerWorkspace({ pageData, result, onAnalyzeAnother, onBackToAnalyzer }) {
   const view = useMemo(() => {
+    const hasJobDescription = Boolean(result.match?.job_description_provided || pageData.jobDescription?.trim());
     const atsScore = clampScore(result.quality?.ats_score);
-    const resumeScore = clampScore(result.scorecard?.resume_score);
-    const structureScore = clampScore(result.scorecard?.structure_score);
-    const contentScore = clampScore(result.scorecard?.content_score);
-    const impactScore = clampScore(result.quality?.impact_score);
-    const spellingScore = clampScore(result.spelling?.score);
-    const matchScore = result.match?.job_description_provided
-      ? clampScore(result.match?.match_score)
+
+    const extractedSkills = smartUniqueList([
+      ...(result.analysis?.skills || []),
+      ...(result.analysis?.technical_skills || []),
+      ...(result.analysis?.tools || []),
+    ]);
+    const requiredKeywords = smartUniqueList([
+      ...(result.match?.missing_keywords || []),
+      ...(result.role_focus?.missing_keywords || []),
+      ...(result.job_requirements?.required_skills || []),
+      ...(result.job_requirements?.preferred_skills || []),
+    ]);
+    const matchedKeywords = smartUniqueList([
+      ...(result.match?.matched_keywords || []),
+      ...extractedSkills.filter((skill) =>
+        requiredKeywords.some((keyword) => canonicalValue(keyword) === canonicalValue(skill))
+      ),
+    ]).slice(0, 10);
+    const skillsToAdd = smartUniqueList(
+      requiredKeywords.filter(
+        (keyword) =>
+          !matchedKeywords.some((matched) => canonicalValue(matched) === canonicalValue(keyword))
+      )
+    ).slice(0, 12);
+
+    const derivedResumeScore = averageScores([
+      atsScore,
+      result.scorecard?.resume_score,
+      result.scorecard?.content_score,
+      result.quality?.overall_score,
+    ]);
+    const structureSections = normalizeSections(result);
+    const derivedStructure = clampScore(
+      structureSections.detectedSections.length
+        ? (structureSections.detectedSections.length / 4) * 100
+        : result.quality?.section_coverage_score
+    );
+    const derivedContent = averageScores([
+      result.scorecard?.content_score,
+      extractedSkills.length ? 70 : 25,
+      (result.analysis?.project_highlights || []).length ? 65 : 25,
+    ]);
+    const derivedImpact = averageScores([
+      result.quality?.impact_score,
+      result.quality?.numeric_mentions ? Math.min(100, result.quality.numeric_mentions * 12) : 20,
+      result.quality?.quantified_achievements_found ? 72 : 28,
+    ]);
+    const derivedSpelling = clampScore(
+      Number.isFinite(Number(result.spelling?.score))
+        ? result.spelling.score
+        : Math.max(40, 100 - ((result.spelling?.issues || []).length * 18))
+    );
+    const derivedMatch = hasJobDescription
+      ? averageScores([
+          result.match?.match_score,
+          requiredKeywords.length
+            ? (matchedKeywords.length / Math.max(1, requiredKeywords.length)) * 100
+            : extractedSkills.length
+              ? 60
+              : 30,
+        ])
       : 0;
+
+    const resumeScore = derivedResumeScore;
+    const structureScore = derivedStructure;
+    const contentScore = derivedContent;
+    const impactScore = derivedImpact;
+    const spellingScore = derivedSpelling;
+    const matchScore = derivedMatch;
 
     const averageQuality = clampScore(
       Math.round(
@@ -202,8 +345,8 @@ function ResumeAnalyzerWorkspace({ pageData, result, onAnalyzeAnother, onBackToA
           contentScore +
           impactScore +
           spellingScore +
-          (result.match?.job_description_provided ? matchScore : 0)) /
-          (result.match?.job_description_provided ? 7 : 6)
+          (hasJobDescription ? matchScore : 0)) /
+          (hasJobDescription ? 7 : 6)
       )
     );
 
@@ -224,11 +367,11 @@ function ResumeAnalyzerWorkspace({ pageData, result, onAnalyzeAnother, onBackToA
       { label: "Resume Score", value: `${resumeScore}%`, note: qualitySummary.label },
       {
         label: "Role Match",
-        value: result.match?.job_description_provided ? `${matchScore}%` : "--",
-        note: result.match?.job_description_provided ? "against target role" : "job description required",
+        value: hasJobDescription ? `${matchScore}%` : "--",
+        note: hasJobDescription ? "against target role" : "job description required",
       },
-      { label: "Missing Sections", value: result.quality?.missing_sections?.length ?? 0, note: "important gaps" },
-      { label: "Skills Found", value: result.analysis?.skills?.length ?? 0, note: "extracted from resume" },
+      { label: "Missing Sections", value: structureSections.missingSections.length, note: "important gaps" },
+      { label: "Skills Found", value: extractedSkills.length, note: "extracted from resume" },
       { label: "Impact Signals", value: result.quality?.numeric_mentions ?? 0, note: "numbers and outcomes" },
     ];
 
@@ -240,7 +383,7 @@ function ResumeAnalyzerWorkspace({ pageData, result, onAnalyzeAnother, onBackToA
       { label: "Spelling", value: spellingScore, note: "surface polish and keyword accuracy" },
     ];
 
-    if (result.match?.job_description_provided) {
+    if (hasJobDescription) {
       scoreRows.splice(1, 0, {
         label: "Job match",
         value: matchScore,
@@ -248,10 +391,24 @@ function ResumeAnalyzerWorkspace({ pageData, result, onAnalyzeAnother, onBackToA
       });
     }
 
-    const priorityActions = uniqueList([
+    const fallbackRecommendations = [];
+    if (skillsToAdd.length) {
+      fallbackRecommendations.push(`Add or prove ${skillsToAdd.slice(0, 3).join(", ")} in projects or experience bullets.`);
+    }
+    if (structureSections.missingSections.length) {
+      fallbackRecommendations.push(`Make these sections clearer for ATS: ${structureSections.missingSections.join(", ")}.`);
+    }
+    if (!(result.analysis?.project_highlights || []).length) {
+      fallbackRecommendations.push("Add 1 to 2 strong projects with tools used, actions taken, and measurable outcomes.");
+    } else if (!result.quality?.quantified_achievements_found) {
+      fallbackRecommendations.push("Add measurable impact to project and experience bullets using numbers, results, or scale.");
+    }
+
+    const priorityActions = smartUniqueList([
       ...(result.quality?.must_add || []),
       ...(result.role_focus?.where_to_improve || []),
       ...(result.recommendations || []),
+      ...fallbackRecommendations,
     ]).slice(0, 8);
 
     const signals = [
@@ -282,33 +439,77 @@ function ResumeAnalyzerWorkspace({ pageData, result, onAnalyzeAnother, onBackToA
       },
       {
         label: "Target keywords",
-        ok: Boolean((result.match?.matched_keywords || []).length),
-        note: (result.match?.matched_keywords || []).length ? "partly covered" : "not reflected",
+        ok: Boolean(matchedKeywords.length),
+        note: matchedKeywords.length
+          ? "partly covered"
+          : hasJobDescription
+            ? "not reflected"
+            : "job description not attached",
       },
     ];
 
-    const skillsToAdd = uniqueList([
-      ...(result.match?.missing_keywords || []),
-      ...(result.role_focus?.missing_keywords || []),
-    ]).slice(0, 12);
+    const signalStrengths = smartUniqueList([
+      ...(result.quality?.strengths || []),
+      extractedSkills.length ? `${extractedSkills.length} skill keywords were extracted from the resume.` : "",
+      matchedKeywords.length ? `${matchedKeywords.length} target keywords already align with the job description.` : "",
+      result.quality?.quantified_achievements_found ? "The resume includes quantified proof in bullets." : "",
+    ]);
 
-    const matchedKeywords = uniqueList(result.match?.matched_keywords || []).slice(0, 10);
+    const mustAdd = smartUniqueList([
+      ...(result.quality?.must_add || []),
+      ...(skillsToAdd.length ? [`Add evidence for: ${skillsToAdd.slice(0, 4).join(", ")}.`] : []),
+      ...(structureSections.missingSections.length ? [`Clarify these sections: ${structureSections.missingSections.join(", ")}.`] : []),
+    ]);
+
+    const spellingIssues = (result.spelling?.issues || []).map(
+      (item) => `Replace "${item.word}" with "${item.suggestion}".`
+    );
+
+    const roleSummary = buildRoleSummary(result, hasJobDescription, matchedKeywords, skillsToAdd);
+
+    const weakAreas = (result.dashboard?.weak_areas || []).length
+      ? result.dashboard.weak_areas
+      : [
+          { title: "Structure", score: structureScore, detail: structureSections.missingSections.length ? `Missing or unclear sections: ${structureSections.missingSections.join(", ")}.` : "Section structure is readable." },
+          { title: "Role Alignment", score: hasJobDescription ? matchScore : 0, detail: hasJobDescription ? (skillsToAdd.length ? `Missing or weak alignment on ${skillsToAdd.slice(0, 3).join(", ")}.` : "Core job keywords are showing up well.") : "Attach a job description for direct role alignment." },
+          { title: "Projects", score: impactScore, detail: (result.analysis?.project_highlights || []).length ? (result.quality?.quantified_achievements_found ? "Projects exist, but sharpen them with clearer outcomes where possible." : "Projects are present, but they need measurable impact.") : "No clear project evidence was extracted." },
+        ];
+
+    const meters = (result.dashboard?.meters || []).length
+      ? result.dashboard.meters
+      : [
+          { label: "Resume Score", value: resumeScore, tone: getScoreTone(resumeScore) === "success" ? "teal" : getScoreTone(resumeScore) === "warning" ? "gold" : "slate" },
+          { label: "Structure Score", value: structureScore, tone: getScoreTone(structureScore) === "success" ? "teal" : getScoreTone(structureScore) === "warning" ? "gold" : "slate" },
+          { label: "Content Score", value: contentScore, tone: getScoreTone(contentScore) === "success" ? "teal" : getScoreTone(contentScore) === "warning" ? "gold" : "slate" },
+          { label: "ATS Score", value: atsScore, tone: "ink" },
+          { label: "Impact Score", value: impactScore, tone: getScoreTone(impactScore) === "success" ? "teal" : getScoreTone(impactScore) === "warning" ? "gold" : "slate" },
+          { label: "Match Score", value: hasJobDescription ? matchScore : 0, tone: getScoreTone(matchScore) === "success" ? "teal" : getScoreTone(matchScore) === "warning" ? "gold" : "slate" },
+        ];
 
     return {
       atsScore,
       averageQuality,
+      detectedSections: structureSections.detectedSections,
+      extractedSkills,
+      meters,
       matchedKeywords,
+      mustAdd,
       priorityActions,
       providerError,
       providerLabel,
       providerNote,
       qualitySummary,
+      roleSummary,
       scoreRows,
       signals,
       skillsToAdd,
+      spellingIssues,
+      strengths: signalStrengths,
       summaryCards,
+      weakAreas,
+      missingSections: structureSections.missingSections,
     };
-  }, [result]);
+  }, [pageData.jobDescription, result]);
 
   return (
     <>
@@ -392,9 +593,9 @@ function ResumeAnalyzerWorkspace({ pageData, result, onAnalyzeAnother, onBackToA
               <FileBarChart2 size={18} />
             </div>
 
-            {(result.dashboard?.meters || []).length ? (
+            {view.meters.length ? (
               <div className="resume-report-meter-grid">
-                {result.dashboard.meters.map((meter) => (
+                {view.meters.map((meter) => (
                   <ScoreMeter
                     key={meter.label}
                     label={meter.label}
@@ -500,9 +701,9 @@ function ResumeAnalyzerWorkspace({ pageData, result, onAnalyzeAnother, onBackToA
                   <Wrench size={18} />
                 </div>
 
-                {(result.dashboard?.weak_areas || []).length ? (
+                {view.weakAreas.length ? (
                   <div className="resume-report-weak-grid">
-                    {result.dashboard.weak_areas.map((item) => (
+                    {view.weakAreas.map((item) => (
                       <div key={item.title} className="resume-report-weak-card">
                         <strong>{item.title}</strong>
                         <span>{displayScore(item.score)}/100</span>
@@ -562,15 +763,15 @@ function ResumeAnalyzerWorkspace({ pageData, result, onAnalyzeAnother, onBackToA
 
                 <ScoreProgressRow
                   label="Section coverage"
-                  value={result.quality?.section_coverage_score}
+                  value={result.quality?.section_coverage_score || clampScore((view.detectedSections.length / 4) * 100)}
                   note="how complete the resume structure appears"
                 />
 
                 <div className="resume-report-list-block">
                   <strong>Detected sections</strong>
                   <div className="resume-report-chip-row">
-                    {(result.quality?.detected_sections || []).length ? (
-                      result.quality.detected_sections.map((section) => (
+                    {view.detectedSections.length ? (
+                      view.detectedSections.map((section) => (
                         <span key={section} className="resume-report-chip is-success">
                           {section}
                         </span>
@@ -586,8 +787,8 @@ function ResumeAnalyzerWorkspace({ pageData, result, onAnalyzeAnother, onBackToA
                 <div className="resume-report-list-block">
                   <strong>Missing sections</strong>
                   <div className="resume-report-chip-row">
-                    {(result.quality?.missing_sections || []).length ? (
-                      result.quality.missing_sections.map((section) => (
+                    {view.missingSections.length ? (
+                      view.missingSections.map((section) => (
                         <span key={section} className="resume-report-chip is-missing">
                           {section}
                         </span>
@@ -611,8 +812,7 @@ function ResumeAnalyzerWorkspace({ pageData, result, onAnalyzeAnother, onBackToA
                 </div>
 
                 <p className="resume-report-copy">
-                  {result.match?.summary ||
-                    "Attach a job description to get stronger role-fit and missing keyword guidance."}
+                  {view.roleSummary}
                 </p>
 
                 <div className="resume-report-list-block">
@@ -660,8 +860,8 @@ function ResumeAnalyzerWorkspace({ pageData, result, onAnalyzeAnother, onBackToA
                 </div>
 
                 <InsightList
-                  items={result.recommendations || []}
-                  emptyText="No recommendations were generated yet."
+                  items={view.priorityActions}
+                  emptyText="We found limited information. Try improving formatting and adding clearer role keywords."
                   tone="soft"
                 />
 
@@ -690,7 +890,7 @@ function ResumeAnalyzerWorkspace({ pageData, result, onAnalyzeAnother, onBackToA
                 </div>
 
                 <InsightList
-                  items={result.quality?.strengths || []}
+                  items={view.strengths}
                   emptyText="No strong strengths were detected yet. Add clearer sections and measurable results."
                   tone="success"
                   icon="success"
@@ -707,7 +907,7 @@ function ResumeAnalyzerWorkspace({ pageData, result, onAnalyzeAnother, onBackToA
                 </div>
 
                 <InsightList
-                  items={result.quality?.must_add || []}
+                  items={view.mustAdd}
                   emptyText="No urgent missing items were detected."
                   tone="danger"
                   icon="accent"
@@ -716,8 +916,8 @@ function ResumeAnalyzerWorkspace({ pageData, result, onAnalyzeAnother, onBackToA
                 <div className="resume-report-list-block">
                   <strong>Extracted skills</strong>
                   <div className="resume-report-chip-row">
-                    {(result.analysis?.skills || []).length ? (
-                      result.analysis.skills.map((skill) => (
+                    {view.extractedSkills.length ? (
+                      view.extractedSkills.map((skill) => (
                         <span key={skill} className="resume-report-chip">
                           {skill}
                         </span>
@@ -769,9 +969,7 @@ function ResumeAnalyzerWorkspace({ pageData, result, onAnalyzeAnother, onBackToA
                 <p className="resume-report-copy">{result.spelling?.summary}</p>
 
                 <InsightList
-                  items={(result.spelling?.issues || []).map(
-                    (item) => `Replace "${item.word}" with "${item.suggestion}".`
-                  )}
+                  items={view.spellingIssues}
                   emptyText="No obvious spelling issues were flagged."
                   tone="soft"
                 />
@@ -844,4 +1042,3 @@ function ResumeAnalyzerResults() {
 }
 
 export default ResumeAnalyzerResults;
-
