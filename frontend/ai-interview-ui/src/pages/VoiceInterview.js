@@ -2010,6 +2010,34 @@ function buildPayload(context) {
 
 
 
+  let candidateName = "";
+
+
+
+  try {
+
+
+
+    const storedUser = JSON.parse(localStorage.getItem("user") || "{}");
+
+
+
+    candidateName = storedUser?.first_name || "";
+
+
+
+  } catch {
+
+
+
+    candidateName = "";
+
+
+
+  }
+
+
+
   const selectedOptions = Array.isArray(context.selectedOptions) ? context.selectedOptions.filter(Boolean) : [];
 
 
@@ -2103,6 +2131,14 @@ function buildPayload(context) {
 
 
     resume_text: context.resumeText || "",
+
+
+
+    resume_insights: context.resumeInsights || null,
+
+
+
+    candidate_name: context.candidateName || candidateName || "",
 
 
 
@@ -2569,6 +2605,19 @@ const pauseForFullscreenLossRef = useRef(() => {});
 
 
   const [sessionMeta, setSessionMeta] = useState({});
+
+
+
+  const [adaptiveData, setAdaptiveData] = useState({
+    enabled: false,
+    currentDifficulty: "medium",
+    skillCount: 0,
+    totalQuestions: 10,
+    currentQuestionTimeLimit: 60,
+    difficultyHistory: [],
+  });
+
+  const [currentSkill, setCurrentSkill] = useState("");
 
 
 
@@ -5236,6 +5285,7 @@ const cancelStartupPause = () => {
   setSessionId("");
   setProviders({});
   setQuestion("");
+  setCurrentSkill("");
   setTotal(0);
   setIndex(0);
   setTimeLeftSeconds(null);
@@ -5865,7 +5915,27 @@ pauseForFullscreenLossRef.current = pauseForFullscreenLoss;
 
 
 
-
+      // Update adaptive data if available
+      if (adaptiveData.enabled && response.data?.difficulty_adjusted_to) {
+        setAdaptiveData((prev) => {
+          const newDifficulty = response.data.difficulty_adjusted_to;
+          const timeMap = {
+            "easy": 45,
+            "medium": 60,
+            "hard": 90,
+          };
+          return {
+            ...prev,
+            currentDifficulty: newDifficulty,
+            currentQuestionTimeLimit: timeMap[newDifficulty] || 60,
+            difficultyHistory: [...prev.difficultyHistory, newDifficulty],
+          };
+        });
+        // Extract current skill from response
+        if (response.data?.current_skill) {
+          setCurrentSkill(response.data.current_skill);
+        }
+      }
 
 
 
@@ -6041,6 +6111,7 @@ const beginVoiceInterview = async () => {
   setInterviewEntering(false);
   setStatus("Starting interview...");
   setQuestion("");
+  setCurrentSkill("");
   setStarted(false);
 
   try {
@@ -6096,6 +6167,23 @@ const beginVoiceInterview = async () => {
     setQuestion(safeText(data.current_question));
     setTotal(data.total_questions || 0);
     setIndex(0);
+    
+    // Handle adaptive interview data
+    if (data.adaptive_enabled) {
+      setAdaptiveData({
+        enabled: true,
+        currentDifficulty: data.starting_difficulty || "medium",
+        skillCount: data.skill_count || 0,
+        totalQuestions: data.total_questions || 10,
+        currentQuestionTimeLimit: data.time_limit_map?.[data.starting_difficulty] || 60,
+        difficultyHistory: [data.starting_difficulty || "medium"],
+      });
+      // Extract current skill from initial response
+      if (data.current_skill) {
+        setCurrentSkill(data.current_skill);
+      }
+    }
+    
     setStatus(
       cameraError
         ? "Interview ready. Camera preview is unavailable, but the voice interview will start shortly."
@@ -7180,26 +7268,12 @@ useEffect(() => {
 
 
 
-  const timerLabel =
-
-
-
-    timeLeftSeconds == null
-
-
-
+  const timerLabel = adaptiveData.enabled
+    ? `${adaptiveData.currentDifficulty === "easy" ? "45 sec" : adaptiveData.currentDifficulty === "medium" ? "60 sec" : "90 sec"} (${adaptiveData.currentDifficulty})`
+    : timeLeftSeconds == null
       ? "No active timer"
-
-
-
       : `${Math.floor(timeLeftSeconds / 60)
-
-
-
           .toString()
-
-
-
           .padStart(2, "0")}:${(timeLeftSeconds % 60).toString().padStart(2, "0")}`;
 
 
@@ -7655,7 +7729,7 @@ useEffect(() => {
 
 
 
-                  <span>Difficulty: {safeText(sessionMeta.difficulty || payload.experience) || "Adaptive"}</span>
+                  <span>Difficulty: {adaptiveData.enabled ? `${adaptiveData.currentDifficulty.charAt(0).toUpperCase() + adaptiveData.currentDifficulty.slice(1)} (Adaptive)` : (safeText(sessionMeta.difficulty || payload.experience) || "Adaptive")}</span>
 
 
 
@@ -7664,6 +7738,68 @@ useEffect(() => {
 
 
                 </div>
+
+                {adaptiveData.enabled && currentSkill && (
+                  <div className="voice-ai-submeta-row">
+                    <span style={{ color: "#2563eb", fontWeight: 600 }}>Current Skill: {currentSkill}</span>
+                  </div>
+                )}
+
+                {adaptiveData.enabled && adaptiveData.difficultyHistory.length > 0 && (
+                  <div className="voice-ai-submeta-row" style={{ gap: 8 }}>
+                    <span style={{ fontSize: 13, color: "#64748b" }}>Progression:</span>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      {adaptiveData.difficultyHistory.map((difficulty, idx) => (
+                        <div key={idx} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <span style={{
+                            padding: "4px 8px",
+                            borderRadius: 4,
+                            fontSize: 12,
+                            fontWeight: 600,
+                            background: difficulty === "easy" ? "rgba(34, 197, 94, 0.2)" : difficulty === "medium" ? "rgba(250, 204, 21, 0.2)" : "rgba(239, 68, 68, 0.2)",
+                            color: difficulty === "easy" ? "#16a34a" : difficulty === "medium" ? "#d97706" : "#dc2626"
+                          }}>
+                            {difficulty.charAt(0).toUpperCase()}
+                          </span>
+                          {idx < adaptiveData.difficultyHistory.length - 1 && (
+                            <span style={{ color: "#cbd5e1", fontSize: 12 }}>→</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {adaptiveData.enabled && (
+                  <div className="voice-ai-submeta-row">
+                    <span style={{ fontSize: 13, color: "#64748b" }}>Remaining Time:</span>
+                    <span style={{
+                      padding: "4px 12px",
+                      borderRadius: 6,
+                      fontSize: 14,
+                      fontWeight: 700,
+                      background: timeLeftSeconds && timeLeftSeconds <= 10 ? "rgba(239, 68, 68, 0.15)" : "rgba(59, 130, 246, 0.15)",
+                      color: timeLeftSeconds && timeLeftSeconds <= 10 ? "#dc2626" : "#1d4ed8"
+                    }}>
+                      {timeLeftSeconds ?? adaptiveData.currentQuestionTimeLimit} sec
+                    </span>
+                  </div>
+                )}
+
+                {adaptiveData.enabled && (
+                  <div className="voice-ai-submeta-row">
+                    <span style={{ fontSize: 13, color: "#64748b" }}>Total Remaining:</span>
+                    <span style={{ fontSize: 13, color: "#475569", fontWeight: 600 }}>
+                      {(() => {
+                        const remainingQuestions = adaptiveData.totalQuestions - (index + 1);
+                        const remainingSeconds = remainingQuestions * adaptiveData.currentQuestionTimeLimit;
+                        const minutes = Math.floor(remainingSeconds / 60);
+                        const seconds = remainingSeconds % 60;
+                        return `${minutes}:${seconds.toString().padStart(2, '0')} • ${remainingQuestions} question${remainingQuestions !== 1 ? 's' : ''}`;
+                      })()}
+                    </span>
+                  </div>
+                )}
 
 
 

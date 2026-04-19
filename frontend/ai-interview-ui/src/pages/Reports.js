@@ -344,6 +344,7 @@ function Reports() {
     const focusAreaLabel = safeText(report?.context?.focus_areas || report?.context?.selected_options) || "core";
     const skillSignals = deriveSkillSignals(report);
     const isHrReport = safeText(report?.context?.category).toLowerCase() === "hr";
+    const isResumeAdaptive = safeText(report?.interview_type).toLowerCase() === "resume_adaptive";
     const scoreBreakdown = report?.score_breakdown && typeof report.score_breakdown === "object"
       ? Object.entries(report.score_breakdown)
           .filter(([, value]) => value != null)
@@ -354,6 +355,28 @@ function Reports() {
             tone: ["teal", "green", "blue", "orange", "indigo"][index % 5],
           }))
       : [];
+    
+    // Process skill-wise breakdown for adaptive resume interviews
+    const skillsBreakdown = isResumeAdaptive && report?.skills_breakdown && typeof report.skills_breakdown === "object"
+      ? Object.entries(report.skills_breakdown)
+          .map(([skillName, skillData]) => ({
+            name: skillName,
+            score: safeScore(skillData?.score),
+            proficiency: safeText(skillData?.proficiency),
+            performance: safeText(skillData?.performance),
+            difficulty_progression: safeTextList(skillData?.difficulty_progression),
+            questions_count: Number(skillData?.questions_count) || 0,
+            strengths: safeTextList(skillData?.strengths),
+            weaknesses: safeTextList(skillData?.weaknesses),
+            recommendation: safeText(skillData?.recommendation),
+          }))
+          .sort((a, b) => b.score - a.score)
+      : [];
+    
+    const topSkills = isResumeAdaptive ? safeTextList(report?.top_skills) : [];
+    const weakestSkills = isResumeAdaptive ? safeTextList(report?.weakest_skills) : [];
+    const avgDifficultyReached = isResumeAdaptive ? safeText(report?.avg_difficulty_reached) : "";
+    
     const retryState = buildRetryState(report);
     const completedLabel = new Date().toLocaleDateString("en-GB");
 
@@ -369,10 +392,12 @@ function Reports() {
     return {
       allMistakes,
       answeredCount,
+      avgDifficultyReached,
       completedLabel,
       experience,
       focusAreaLabel,
       isHrReport,
+      isResumeAdaptive,
       performanceRatio,
       questionCards,
       roundLabel,
@@ -381,7 +406,10 @@ function Reports() {
       roleMode,
       scoreBreakdown,
       skillSignals,
+      skillsBreakdown,
       strongAnswerCount,
+      topSkills,
+      weakestSkills,
       needsWorkCount,
       timer,
     };
@@ -390,10 +418,12 @@ function Reports() {
   const {
     allMistakes,
     answeredCount,
+    avgDifficultyReached,
     completedLabel,
     experience,
     focusAreaLabel,
     isHrReport,
+    isResumeAdaptive,
     performanceRatio,
     questionCards,
     roundLabel,
@@ -402,7 +432,10 @@ function Reports() {
     roleMode,
     scoreBreakdown,
     skillSignals,
+    skillsBreakdown,
     strongAnswerCount,
+    topSkills,
+    weakestSkills,
     needsWorkCount,
     timer,
   } = reportView;
@@ -604,6 +637,124 @@ function Reports() {
                   <MetricTile label="Need work" value={needsWorkCount} tone="orange" />
                   <MetricTile label="Coverage ratio" value={`${performanceRatio}%`} tone="blue" />
                 </div>
+
+                {isResumeAdaptive && skillsBreakdown.length ? (
+                  <div className="report-score-card">
+                    <div className="report-card-header report-card-header-tight">
+                      <div>
+                        <span className="report-card-eyebrow">Skills assessment</span>
+                        <h3>Per-skill performance breakdown</h3>
+                      </div>
+                      <Layers3 size={18} />
+                    </div>
+                    <div className="skills-breakdown-container">
+                      {skillsBreakdown.map((skill) => {
+                        const proficiencyColors = {
+                          "Beginner": "is-beginner",
+                          "Intermediate": "is-intermediate",
+                          "Expert": "is-expert",
+                        };
+                        const performanceColors = {
+                          "Strong": "is-strong",
+                          "Moderate": "is-mid",
+                          "Needs Work": "is-low",
+                        };
+                        
+                        return (
+                          <div key={skill.name} className="skill-breakdown-card">
+                            <div className="skill-header">
+                              <div className="skill-title">
+                                <h4>{skill.name}</h4>
+                                <span className={`skill-proficiency-badge ${proficiencyColors[skill.proficiency] || "is-intermediate"}`}>
+                                  {skill.proficiency}
+                                </span>
+                              </div>
+                              <div className={`skill-score ${performanceColors[skill.performance] || "is-mid"}`}>
+                                {skill.score}/100
+                              </div>
+                            </div>
+
+                            <div className="skill-content">
+                              <div className="skill-metric">
+                                <span>Questions: {skill.questions_count}</span>
+                              </div>
+
+                              <div className="skill-difficulty">
+                                <span className="difficulty-label">Difficulty progression:</span>
+                                <div className="difficulty-badges">
+                                  {skill.difficulty_progression.map((diff, idx) => {
+                                    const diffColor = {
+                                      "Easy": "diff-easy",
+                                      "Medium": "diff-medium",
+                                      "Hard": "diff-hard",
+                                    };
+                                    return (
+                                      <span key={idx} className={`difficulty-badge ${diffColor[diff] || "diff-medium"}`}>
+                                        {diff === "Easy" ? "⚫" : diff === "Medium" ? "⚫" : "⚫"}
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+
+                              {skill.strengths.length > 0 && (
+                                <div className="skill-section">
+                                  <span className="section-label">Strengths:</span>
+                                  <ul className="skill-list is-strengths">
+                                    {skill.strengths.map((str, idx) => (
+                                      <li key={idx}>✓ {str}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+
+                              {skill.weaknesses.length > 0 && (
+                                <div className="skill-section">
+                                  <span className="section-label">Areas to improve:</span>
+                                  <ul className="skill-list is-weaknesses">
+                                    {skill.weaknesses.map((weak, idx) => (
+                                      <li key={idx}>⚠ {weak}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+
+                              {skill.recommendation && (
+                                <div className="skill-recommendation">
+                                  <Lightbulb size={14} />
+                                  <span>{skill.recommendation}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {(topSkills.length > 0 || weakestSkills.length > 0) && (
+                      <div className="skill-summary">
+                        {topSkills.length > 0 && (
+                          <div className="skill-summary-item">
+                            <span className="summary-label">Top skills:</span>
+                            <span className="summary-value">{topSkills.join(", ")}</span>
+                          </div>
+                        )}
+                        {weakestSkills.length > 0 && (
+                          <div className="skill-summary-item">
+                            <span className="summary-label">Areas to focus:</span>
+                            <span className="summary-value">{weakestSkills.join(", ")}</span>
+                          </div>
+                        )}
+                        {avgDifficultyReached && (
+                          <div className="skill-summary-item">
+                            <span className="summary-label">Adaptive difficulty:</span>
+                            <span className="summary-value">{avgDifficultyReached}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
 
                 {isHrReport && scoreBreakdown.length ? (
                   <div className="report-score-card">

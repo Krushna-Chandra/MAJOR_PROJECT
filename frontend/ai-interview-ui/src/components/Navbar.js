@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef, useState } from "react";
 import ImageCropModal from "./ImageCropModal";
 import { Link, useNavigate, useLocation } from "react-router-dom";
@@ -202,22 +201,21 @@ function Navbar() {
                 <div className="profile-popup pro-popup-ui">
                   <div className="profile-popup-top">
                     <div className="profile-img-edit">
-                      <div className="profile-img-circle" style={{ position: 'relative' }}>
-                        {user?.profile_image ? (
-                          <img src={user.profile_image} alt="Profile" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
-                        ) : (
-                          <span className="profile-img-initial">{userInitial}</span>
-                        )}
-                        <span
-                          className="profile-img-edit-icon"
+<div
+                          className="profile-img-circle"
+                          style={{ position: 'relative', cursor: 'pointer' }}
                           title="Edit Photo"
                           onClick={e => {
                             e.stopPropagation();
                             document.getElementById('profile-img-input').click();
                           }}
                         >
-                          ✏️
-                        </span>
+                          {user?.profile_image ? (
+                            <img src={user.profile_image} alt="Profile" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                          ) : (
+                            <span className="profile-img-initial">{userInitial}</span>
+                          )}
+                          <div className="profile-img-hover-text">Edit</div>
                         <input
                           id="profile-img-input"
                           type="file"
@@ -331,7 +329,7 @@ function Navbar() {
                       <div className="logout-confirm-heading">
                         <h3>Log out now?</h3>
                         <p className="logout-confirm-subtitle">
-                          You’re about to end your current session.
+                          You're about to end your current session.
                         </p>
                       </div>
                     </div>

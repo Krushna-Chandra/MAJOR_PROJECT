@@ -652,6 +652,32 @@ function ResumeAnalyzerWorkspace({ pageData, result, onAnalyzeAnother, onBackToA
             </div>
           </article>
 
+          <article className="resume-report-panel">
+            <div className="resume-report-panel-head">
+              <div>
+                <span>Resume content</span>
+                <h3>What the analyzer extracted</h3>
+              </div>
+              <Sparkles size={18} />
+            </div>
+
+            <HighlightBlock
+              title="Experience"
+              items={result.analysis?.experience_highlights || []}
+              emptyText="No strong experience lines were extracted."
+            />
+            <HighlightBlock
+              title="Projects"
+              items={result.analysis?.project_highlights || []}
+              emptyText="No clear project lines were extracted."
+            />
+            <HighlightBlock
+              title="Education"
+              items={result.analysis?.education || []}
+              emptyText="No clear education lines were extracted."
+            />
+          </article>
+
           <div className="resume-report-results">
             <div className="resume-report-dashboard-grid">
               <article className="resume-report-wide-panel resume-report-dashboard-grid-top">
@@ -673,23 +699,6 @@ function ResumeAnalyzerWorkspace({ pageData, result, onAnalyzeAnother, onBackToA
                     />
                   ))}
                 </div>
-              </article>
-
-              <article className="resume-report-panel resume-report-panel-featured">
-                <div className="resume-report-panel-head">
-                  <div>
-                    <span>Improve first</span>
-                    <h3>Priority action plan</h3>
-                  </div>
-                  <Target size={18} />
-                </div>
-
-                <InsightList
-                  items={view.priorityActions}
-                  emptyText="No major action items were generated. Focus on polishing bullets and tailoring the final draft."
-                  tone="priority"
-                  icon="accent"
-                />
               </article>
 
               <article className="resume-report-panel">
@@ -716,6 +725,23 @@ function ResumeAnalyzerWorkspace({ pageData, result, onAnalyzeAnother, onBackToA
                     Weak-area cards are not available in this result yet.
                   </div>
                 )}
+              </article>
+
+              <article className="resume-report-panel resume-report-panel-featured">
+                <div className="resume-report-panel-head">
+                  <div>
+                    <span>Improve first</span>
+                    <h3>Priority action plan</h3>
+                  </div>
+                  <Target size={18} />
+                </div>
+
+                <InsightList
+                  items={view.priorityActions}
+                  emptyText="No major action items were generated. Focus on polishing bullets and tailoring the final draft."
+                  tone="priority"
+                  icon="accent"
+                />
               </article>
             </div>
 
@@ -749,6 +775,54 @@ function ResumeAnalyzerWorkspace({ pageData, result, onAnalyzeAnother, onBackToA
                       </div>
                     </div>
                   ))}
+                </div>
+              </article>
+
+              <article className="resume-report-panel">
+                <div className="resume-report-panel-head">
+                  <div>
+                    <span>Role alignment</span>
+                    <h3>Keyword map</h3>
+                  </div>
+                  <TrendingUp size={18} />
+                </div>
+
+                <p className="resume-report-copy">
+                  {view.roleSummary}
+                </p>
+
+                <div className="resume-report-list-block">
+                  <strong>Matched keywords</strong>
+                  <div className="resume-report-chip-row">
+                    {view.matchedKeywords.length ? (
+                      view.matchedKeywords.map((keyword) => (
+                        <span key={keyword} className="resume-report-chip is-success">
+                          {keyword}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="resume-report-chip is-muted">
+                        No strong keyword overlap detected yet
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="resume-report-list-block">
+                  <strong>Skills / keywords to add</strong>
+                  <div className="resume-report-chip-row">
+                    {view.skillsToAdd.length ? (
+                      view.skillsToAdd.map((keyword) => (
+                        <span key={keyword} className="resume-report-chip is-missing">
+                          {keyword}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="resume-report-chip is-success">
+                        No urgent missing role keywords detected
+                      </span>
+                    )}
+                  </div>
                 </div>
               </article>
 
@@ -805,49 +879,18 @@ function ResumeAnalyzerWorkspace({ pageData, result, onAnalyzeAnother, onBackToA
               <article className="resume-report-panel">
                 <div className="resume-report-panel-head">
                   <div>
-                    <span>Role alignment</span>
-                    <h3>Keyword map</h3>
+                    <span>Strengths</span>
+                    <h3>What is already working</h3>
                   </div>
-                  <TrendingUp size={18} />
+                  <BadgeCheck size={18} />
                 </div>
 
-                <p className="resume-report-copy">
-                  {view.roleSummary}
-                </p>
-
-                <div className="resume-report-list-block">
-                  <strong>Matched keywords</strong>
-                  <div className="resume-report-chip-row">
-                    {view.matchedKeywords.length ? (
-                      view.matchedKeywords.map((keyword) => (
-                        <span key={keyword} className="resume-report-chip is-success">
-                          {keyword}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="resume-report-chip is-muted">
-                        No strong keyword overlap detected yet
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="resume-report-list-block">
-                  <strong>Skills / keywords to add</strong>
-                  <div className="resume-report-chip-row">
-                    {view.skillsToAdd.length ? (
-                      view.skillsToAdd.map((keyword) => (
-                        <span key={keyword} className="resume-report-chip is-missing">
-                          {keyword}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="resume-report-chip is-success">
-                        No urgent missing role keywords detected
-                      </span>
-                    )}
-                  </div>
-                </div>
+                <InsightList
+                  items={view.strengths}
+                  emptyText="No strong strengths were detected yet. Add clearer sections and measurable results."
+                  tone="success"
+                  icon="success"
+                />
               </article>
 
               <article className="resume-report-panel">
@@ -883,23 +926,6 @@ function ResumeAnalyzerWorkspace({ pageData, result, onAnalyzeAnother, onBackToA
               <article className="resume-report-panel">
                 <div className="resume-report-panel-head">
                   <div>
-                    <span>Strengths</span>
-                    <h3>What is already working</h3>
-                  </div>
-                  <BadgeCheck size={18} />
-                </div>
-
-                <InsightList
-                  items={view.strengths}
-                  emptyText="No strong strengths were detected yet. Add clearer sections and measurable results."
-                  tone="success"
-                  icon="success"
-                />
-              </article>
-
-              <article className="resume-report-panel">
-                <div className="resume-report-panel-head">
-                  <div>
                     <span>Must add</span>
                     <h3>High-priority missing items</h3>
                   </div>
@@ -929,32 +955,6 @@ function ResumeAnalyzerWorkspace({ pageData, result, onAnalyzeAnother, onBackToA
                     )}
                   </div>
                 </div>
-              </article>
-
-              <article className="resume-report-panel">
-                <div className="resume-report-panel-head">
-                  <div>
-                    <span>Resume content</span>
-                    <h3>What the analyzer extracted</h3>
-                  </div>
-                  <Sparkles size={18} />
-                </div>
-
-                <HighlightBlock
-                  title="Experience"
-                  items={result.analysis?.experience_highlights || []}
-                  emptyText="No strong experience lines were extracted."
-                />
-                <HighlightBlock
-                  title="Projects"
-                  items={result.analysis?.project_highlights || []}
-                  emptyText="No clear project lines were extracted."
-                />
-                <HighlightBlock
-                  title="Education"
-                  items={result.analysis?.education || []}
-                  emptyText="No clear education lines were extracted."
-                />
               </article>
 
               <article className="resume-report-panel">

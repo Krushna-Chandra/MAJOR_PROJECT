@@ -16,6 +16,7 @@ import DashboardPage from "./pages/DashboardPage";
 import ResumeAnalyzer from "./pages/ResumeAnalyzer";
 import ResumeAnalyzerResults from "./pages/ResumeAnalyzerResults";
 import ResumeInterview from "./pages/ResumeInterview";
+import AnalyzedResume from "./pages/AnalyzedResume";
 import AboutUs from "./pages/AboutUs";
 import Reports from "./pages/Reports";
 import ForgotPassword from "./pages/ForgotPassword";
@@ -229,6 +230,15 @@ function AppRoutes({ routeLocation }) {
         element={
           <ProtectedRoute>
             <ResumeInterview />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/analyzed-resume"
+        element={
+          <ProtectedRoute>
+            <AnalyzedResume />
           </ProtectedRoute>
         }
       />

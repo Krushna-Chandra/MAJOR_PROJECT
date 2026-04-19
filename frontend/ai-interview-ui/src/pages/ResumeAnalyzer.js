@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import {
@@ -13,6 +13,12 @@ import {
   WandSparkles,
 } from "lucide-react";
 import "../App.css";
+import {
+  CORPORATE_JOB_ROLES,
+  getResolvedJobRole,
+  getRoleSuggestions,
+  normalizeRoleText,
+} from "../utils/roleSearch";
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || "http://127.0.0.1:8000";
 const ANALYZER_RESULT_STORAGE_KEY = "resumeAnalyzerResult";
@@ -24,8 +30,62 @@ function formatFileSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function isValidJobDescription(value) {
-  return (value.match(/[A-Za-z][A-Za-z0-9+#./-]*/g) || []).length >= 20;
+const EXPERIENCE_OPTIONS = [
+  "Fresher",
+  "1-3 years",
+  "3-5 years",
+  "5+ years",
+];
+
+function buildCareerObjective(role, experience) {
+  const cleanRole = getResolvedJobRole(role, CORPORATE_JOB_ROLES);
+  if (!cleanRole) return "";
+
+  const normalizedRole = cleanRole.toLowerCase();
+  const experienceLabel = experience || "Fresher";
+  const normalizedExperience = experienceLabel.toLowerCase();
+  const isFresherLike = ["entry level", "fresher", "intern", "0-1 years"].includes(normalizedExperience);
+
+  const roleFocus =
+    /data|analyst|analytics|business intelligence|power bi|tableau/.test(normalizedRole)
+      ? "use analytical thinking, reporting skills, and data interpretation to support better business decisions"
+      : /frontend|ui|ux|web|react|angular|vue/.test(normalizedRole)
+        ? "build clean, responsive, and user-friendly digital experiences"
+        : /backend|software|developer|engineer|full stack|devops|cloud|security|qa|automation|sre|database/.test(normalizedRole)
+          ? "apply technical problem-solving, development knowledge, and project experience to build reliable solutions"
+          : /product|project|scrum/.test(normalizedRole)
+            ? "support planning, execution, collaboration, and delivery across teams"
+            : /marketing|sales|customer success|operations|finance|hr|talent|recruit/.test(normalizedRole)
+              ? "contribute strong communication, coordination, and business skills in a results-driven team"
+              : "apply relevant skills, practical knowledge, and a growth mindset in a professional role";
+
+  if (isFresherLike) {
+    return `Motivated and enthusiastic fresher seeking a ${cleanRole} role where I can ${roleFocus} while learning from real-world work, strengthening my professional capabilities, and contributing with dedication from the beginning of my career.`;
+  }
+
+  if (normalizedExperience === "1-3 years") {
+    return `Early-career professional seeking a ${cleanRole} role where I can ${roleFocus}, build on my existing experience, and contribute with consistency, adaptability, and a strong learning mindset.`;
+  }
+
+  if (normalizedExperience === "3-5 years") {
+    return `Experienced professional seeking a ${cleanRole} role where I can ${roleFocus}, take ownership of meaningful work, and deliver strong results through practical experience and collaboration.`;
+  }
+
+  if (normalizedExperience === "5+ years") {
+    return `Seasoned professional seeking a ${cleanRole} role where I can ${roleFocus}, drive high-quality outcomes, and add value through deep hands-on experience and dependable execution.`;
+  }
+
+  return `Results-oriented professional seeking a ${cleanRole} role where I can ${roleFocus}, contribute effectively based on my ${experienceLabel.toLowerCase()} background, and continue growing through meaningful work and measurable impact.`;
+}
+
+function generateJobDescription(role, experience) {
+  const cleanRole = getResolvedJobRole(role, CORPORATE_JOB_ROLES);
+  if (!cleanRole) return "";
+  const cleanExperience = experience || "Fresher";
+  const careerObjective = buildCareerObjective(cleanRole, cleanExperience);
+  return `Job Role: ${cleanRole}
+Experience: ${cleanExperience}
+Career Objective: ${careerObjective}`;
 }
 
 function ResumeAnalyzer() {
@@ -33,41 +93,114 @@ function ResumeAnalyzer() {
   const [resumeName, setResumeName] = useState("");
   const [resumeDataUrl, setResumeDataUrl] = useState("");
   const [resumeBytes, setResumeBytes] = useState(0);
+  const [jobRole, setJobRole] = useState("");
+  const [experienceLevel, setExperienceLevel] = useState("");
   const [jobDescription, setJobDescription] = useState("");
+  const [roleSuggestions, setRoleSuggestions] = useState([]);
+  const [showRoleSuggestions, setShowRoleSuggestions] = useState(false);
+  const [uploadError, setUploadError] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [uploadInputKey, setUploadInputKey] = useState(0);
 
-  const handleResumeFile = (event) => {
+  const authHeaders = () => {
+    const token = localStorage.getItem("token");
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
+  const clearUploadedResume = () => {
+    setResumeName("");
+    setResumeDataUrl("");
+    setResumeBytes(0);
+    setUploadError("");
+    setUploadInputKey((current) => current + 1);
+  };
+
+  const handleResumeFile = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
     const isPdf =
       file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
     if (!isPdf) {
-      setError("Please upload a PDF resume.");
+      clearUploadedResume();
+      setUploadError("Please upload a PDF file only.");
       return;
     }
 
+    setLoading(true);
+    setError("");
+    setUploadError("");
+
     const reader = new FileReader();
     reader.onload = () => {
+      const nextDataUrl = typeof reader.result === "string" ? reader.result : "";
+      if (!nextDataUrl) {
+        clearUploadedResume();
+        setUploadError("We could not read this file. Please try another PDF.");
+        setLoading(false);
+        return;
+      }
+
       setResumeName(file.name);
       setResumeBytes(file.size || 0);
-      setResumeDataUrl(typeof reader.result === "string" ? reader.result : "");
+      setResumeDataUrl(nextDataUrl);
+      setUploadError("");
       setError("");
       setLoading(false);
     };
     reader.onerror = () => {
-      setError("We could not read this file. Please try another PDF.");
+      clearUploadedResume();
+      setUploadError("We could not read this file. Please try another PDF.");
+      setLoading(false);
     };
     reader.readAsDataURL(file);
+  };
+
+  useEffect(() => {
+    setJobDescription(generateJobDescription(jobRole, experienceLevel));
+  }, [jobRole, experienceLevel]);
+
+  const handleJobRoleChange = (event) => {
+    const value = event.target.value;
+    setJobRole(value);
+    setShowRoleSuggestions(true);
+    if (value.trim()) {
+      setRoleSuggestions(getRoleSuggestions(value, CORPORATE_JOB_ROLES));
+    } else {
+      setRoleSuggestions([]);
+    }
+  };
+
+  const handleJobRoleBlur = () => {
+    window.setTimeout(() => {
+      setShowRoleSuggestions(false);
+      const resolvedRole = getResolvedJobRole(jobRole, CORPORATE_JOB_ROLES);
+      if (
+        resolvedRole &&
+        normalizeRoleText(resolvedRole) !== normalizeRoleText(jobRole)
+      ) {
+        setJobRole(resolvedRole);
+      }
+    }, 120);
+  };
+
+  const selectRoleSuggestion = (role) => {
+    setJobRole(role);
+    setShowRoleSuggestions(false);
+    setRoleSuggestions(getRoleSuggestions(role, CORPORATE_JOB_ROLES));
   };
 
   const resetAnalyzer = () => {
     setResumeName("");
     setResumeDataUrl("");
     setResumeBytes(0);
+    setJobRole("");
+    setExperienceLevel("");
     setJobDescription("");
+    setRoleSuggestions([]);
+    setShowRoleSuggestions(false);
+    setUploadError("");
     setError("");
     setLoading(false);
     setUploadInputKey((current) => current + 1);
@@ -84,9 +217,9 @@ function ResumeAnalyzer() {
       setError("Upload your resume PDF first.");
       return;
     }
-    if (!isValidJobDescription(jobDescription)) {
+    if (!jobRole.trim() || !experienceLevel.trim()) {
       setError(
-        "Please add a valid job description with enough detail before running the analysis."
+        "Please choose a job role and experience level before running the analysis."
       );
       return;
     }
@@ -95,7 +228,6 @@ function ResumeAnalyzer() {
       setLoading(true);
       setError("");
 
-      const token = localStorage.getItem("token");
       const response = await axios.post(
         `${API_BASE_URL}/resume-analyzer`,
         {
@@ -104,11 +236,7 @@ function ResumeAnalyzer() {
           job_description: jobDescription,
         },
         {
-          headers: token
-            ? {
-                Authorization: `Bearer ${token}`,
-              }
-            : {},
+          headers: authHeaders(),
           timeout: 60000,
         }
       );
@@ -187,8 +315,8 @@ function ResumeAnalyzer() {
               <h1>Upload your resume. See what is weak. Leave with a sharper draft.</h1>
               <p>
                 This analyzer is built like a focused workspace, not a typical
-                app form. Upload your PDF, preview it instantly, add the target
-                job description, and get a full review once the report is ready.
+                app form. Upload your PDF, preview it instantly, choose a target
+                role and experience level, and get a full review once the report is ready.
               </p>
 
               <div className="resume-studio-quick-grid">
@@ -278,25 +406,87 @@ function ResumeAnalyzer() {
               </div>
             ) : (
               <div className="resume-studio-empty-preview">
-                <div className="resume-studio-empty-icon">
-                  <FileSearch size={22} />
-                </div>
-                <strong>Preview appears here</strong>
-                <p>Your uploaded resume will be shown here before analysis starts.</p>
+                {uploadError ? (
+                  <div className="resume-studio-preview-upload-alert" role="alert">
+                    <div className="resume-studio-empty-icon is-error">
+                      <CircleAlert size={22} />
+                    </div>
+                    <strong>Upload not accepted</strong>
+                    <p>{uploadError}</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="resume-studio-empty-icon">
+                      <FileSearch size={22} />
+                    </div>
+                    <strong>Preview appears here</strong>
+                    <p>Your uploaded resume will be shown here before analysis starts.</p>
+                  </>
+                )}
               </div>
             )}
 
             <div className="resume-studio-field">
-              <label htmlFor="job-description">Target job description</label>
+              <label htmlFor="job-role">Target role</label>
+              <div className="resume-studio-autocomplete">
+                <input
+                  id="job-role"
+                  className="resume-studio-input"
+                  placeholder="Search a job role — e.g. Software Engineer"
+                  value={jobRole}
+                  onChange={handleJobRoleChange}
+                  onFocus={() => setShowRoleSuggestions(true)}
+                  onBlur={handleJobRoleBlur}
+                  autoComplete="off"
+                />
+                {showRoleSuggestions && roleSuggestions.length > 0 && (
+                  <ul className="resume-studio-suggestions">
+                    {roleSuggestions.map((role) => (
+                      <li
+                        key={role}
+                        onMouseDown={() => selectRoleSuggestion(role)}
+                      >
+                        {role}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <small className="resume-studio-field-note">
+                Start typing to see matching roles. If the exact role is not listed, the field suggests and corrects to the closest matching job role.
+              </small>
+            </div>
+
+            <div className="resume-studio-field">
+              <label htmlFor="experience-level">Experience level</label>
+              <select
+                id="experience-level"
+                className="resume-studio-input"
+                value={experienceLevel}
+                onChange={(event) => setExperienceLevel(event.target.value)}
+              >
+                <option value="">Select experience level</option>
+                {EXPERIENCE_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+              <small className="resume-studio-field-note">
+                Choose how much experience the target role requires.
+              </small>
+            </div>
+
+            <div className="resume-studio-field">
+              <label>Generated target job description</label>
               <textarea
-                id="job-description"
                 className="resume-studio-textarea"
-                placeholder="Paste the full job description here. This report now uses the target role to score fit, highlight weak areas, and flag spelling issues tied to the job."
                 value={jobDescription}
-                onChange={(event) => setJobDescription(event.target.value)}
+                readOnly
+                rows={5}
               />
               <small className="resume-studio-field-note">
-                Paste the full job description. The analyzer uses it to extract required skills, education, experience, role-fit gaps, and ATS keywords.
+                The analyzer generates this description from your selected role and experience.
               </small>
             </div>
 
@@ -304,7 +494,7 @@ function ResumeAnalyzer() {
               <button
                 className="resume-studio-btn is-primary"
                 onClick={analyzeResume}
-                disabled={!resumeDataUrl || loading || !isValidJobDescription(jobDescription)}
+                disabled={!resumeDataUrl || loading || !jobRole.trim() || !experienceLevel.trim()}
               >
                 {loading ? (
                   <>
@@ -382,7 +572,7 @@ function ResumeAnalyzer() {
               <h3>One clean path from raw PDF to final feedback.</h3>
               <ol className="resume-studio-timeline">
                 <li>Upload your resume and verify the preview.</li>
-                <li>Paste the target job description you want to match.</li>
+                <li>Select the target job role and experience you want to match.</li>
                 <li>Run analysis and wait for the completed report.</li>
                 <li>Review required skills, education, weak areas, and stronger bullet ideas.</li>
               </ol>

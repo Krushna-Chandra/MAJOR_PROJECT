@@ -1,5 +1,6 @@
 import os
 import base64
+import codecs
 import re
 import zlib
 import difflib
@@ -7,6 +8,7 @@ import uuid
 import smtplib
 from email.message import EmailMessage
 from io import BytesIO
+from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict
 import numpy as np
@@ -74,6 +76,70 @@ RESUME_SECTION_KEYWORDS = [
     "technologies",
     "internship",
 ]
+
+RESUME_STRUCTURED_SECTION_KEYWORDS = {
+    "objective": [
+        "career objective",
+        "objective",
+        "professional summary",
+        "summary",
+        "profile",
+    ],
+    "education": [
+        "education",
+        "educational qualification",
+        "educational qualifications",
+    ],
+    "experience": [
+        "experience",
+        "work experience",
+        "professional experience",
+    ],
+    "projects_internships": [
+        "internships and projects",
+        "internships & projects",
+        "internship and projects",
+        "internship & projects",
+        "projects and internships",
+        "projects & internships",
+        "project and internships",
+        "project & internships",
+    ],
+    "projects": [
+        "projects",
+        "project",
+        "project experience",
+    ],
+    "internships": [
+        "internships",
+        "internship",
+    ],
+    "skills": [
+        "technical skills",
+        "skills",
+    ],
+    "achievements": [
+        "achievements",
+        "key achievements",
+        "accomplishments",
+    ],
+    "languages": [
+        "languages known",
+        "languages",
+    ],
+    "hobbies": [
+        "hobbies",
+        "interests",
+        "extra curricular",
+        "extracurricular activities",
+    ],
+    "personal": [
+        "personal details",
+    ],
+    "declaration": [
+        "declaration",
+    ],
+}
 
 KNOWN_RESUME_SKILLS = [
     "python",
@@ -198,6 +264,39 @@ COMMON_RESUME_MISSPELLINGS = {
     "mangodb": "mongodb",
 }
 
+RESUME_HEADINGS_FOR_NORMALIZATION = [
+    "CAREER OBJECTIVE",
+    "PROFESSIONAL SUMMARY",
+    "SUMMARY",
+    "PROFILE",
+    "EDUCATIONAL QUALIFICATION",
+    "EDUCATIONAL QUALIFICATIONS",
+    "EDUCATION",
+    "TECHNICAL SKILLS",
+    "INTERNSHIPS & PROJECTS",
+    "INTERNSHIPS AND PROJECTS",
+    "PROJECTS & INTERNSHIPS",
+    "PROJECTS AND INTERNSHIPS",
+    "INTERNSHIP & PROJECTS",
+    "INTERNSHIP AND PROJECTS",
+    "PROJECT & INTERNSHIPS",
+    "PROJECT AND INTERNSHIPS",
+    "INTERNSHIPS",
+    "INTERNSHIP",
+    "PROJECTS",
+    "PROJECT",
+    "EXPERIENCE",
+    "WORK EXPERIENCE",
+    "PROFESSIONAL EXPERIENCE",
+    "HOBBIES",
+    "INTERESTS",
+    "PERSONAL DETAILS",
+    "ACHIEVEMENTS",
+    "ACHEIVEMENTS",
+    "CERTIFICATIONS",
+    "DECLARATION",
+]
+
 RESUME_MATCH_STOPWORDS = {
     "about",
     "across",
@@ -256,12 +355,88 @@ def _extract_pdf_text_from_bytes(pdf_bytes: bytes) -> str:
             text_parts = []
             for page in reader.pages:
                 text_parts.append(page.extract_text() or "")
-            text = "\n".join(text_parts).strip()
+            text = _clean_extracted_pdf_text("\n".join(text_parts))
             if text:
                 return text
         except Exception:
             continue
     return _extract_pdf_text_without_dependencies(pdf_bytes)
+
+
+def _insert_resume_heading_breaks(value: str) -> str:
+    text = str(value or "")
+    if not text:
+        return ""
+
+    heading_pattern = "|".join(
+        re.sub(r"\s+", r"\\s*", re.escape(heading))
+        for heading in sorted(RESUME_HEADINGS_FOR_NORMALIZATION, key=len, reverse=True)
+    )
+    return re.sub(
+        rf"(?i)(?<![A-Z0-9])({heading_pattern})(?![A-Z0-9])",
+        lambda match: f"\n{match.group(1)}\n",
+        text,
+    )
+
+
+def _normalize_table_rows(value: str) -> str:
+    lines = []
+    for raw_line in str(value or "").splitlines():
+        if "\t" in raw_line or re.search(r" {4,}", raw_line):
+            cells = [cell.strip() for cell in re.split(r"\t| {4,}", raw_line) if cell.strip()]
+            if len(cells) > 1:
+                lines.append(" | ".join(cells))
+                continue
+        lines.append(raw_line)
+    return "\n".join(lines)
+
+
+def _clean_extracted_pdf_text(value: str) -> str:
+    cleaned = str(value or "")
+    cleaned = cleaned.replace("\x00", "")
+    cleaned = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", cleaned)
+    cleaned = re.sub(r"[•·▪◦●]", "\n- ", cleaned)
+    cleaned = re.sub(r"[â€¢Â·â–ªâ—¦]", "\n- ", cleaned)
+    cleaned = re.sub(r"(?<=\b[A-Z])[ \t]+(?=[A-Z]\b)", "", cleaned)
+    cleaned = _normalize_table_rows(cleaned)
+    cleaned = _insert_resume_heading_breaks(cleaned)
+    cleaned = re.sub(r"[^\S\r\n]+", " ", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
+def _decode_pdf_text_fragment(value: bytes) -> str:
+    raw = bytes(value or b"").strip()
+    if not raw:
+        return ""
+
+    if raw.startswith(codecs.BOM_UTF16_BE) or raw.startswith(codecs.BOM_UTF16_LE):
+        for encoding in ("utf-16", "utf-16-be", "utf-16-le"):
+            try:
+                return _clean_extracted_pdf_text(raw.decode(encoding, errors="ignore"))
+            except Exception:
+                continue
+
+    if b"\x00" in raw:
+        candidates = []
+        for encoding in ("utf-16-be", "utf-16-le"):
+            try:
+                decoded = raw.decode(encoding, errors="ignore")
+            except Exception:
+                continue
+            printable = sum(1 for char in decoded if char.isprintable() and char not in "\x00\x01\x02")
+            if printable:
+                candidates.append((printable, decoded))
+        if candidates:
+            candidates.sort(key=lambda item: item[0], reverse=True)
+            return _clean_extracted_pdf_text(candidates[0][1])
+
+    for encoding in ("utf-8", "latin1"):
+        try:
+            return _clean_extracted_pdf_text(raw.decode(encoding, errors="ignore"))
+        except Exception:
+            continue
+    return ""
 
 
 def _decode_pdf_literal_string(value: bytes) -> str:
@@ -319,7 +494,33 @@ def _decode_pdf_literal_string(value: bytes) -> str:
         result.append(escaped)
         i += 1
 
-    return result.decode("latin1", errors="ignore")
+    return _decode_pdf_text_fragment(bytes(result))
+
+
+def _decode_pdf_hex_string(value: bytes) -> str:
+    payload = re.sub(rb"\s+", b"", value[1:-1])
+    if not payload:
+        return ""
+    if len(payload) % 2 == 1:
+        payload += b"0"
+    try:
+        decoded = bytes.fromhex(payload.decode("ascii", errors="ignore"))
+    except Exception:
+        return ""
+    return _decode_pdf_text_fragment(decoded)
+
+
+def _extract_printable_pdf_runs(value: bytes) -> list[str]:
+    if not value:
+        return []
+    matches = re.findall(rb"[A-Za-z0-9@._%+\-:/\\(),#& ]{4,}", value)
+    chunks = []
+    for match in matches:
+        decoded = _decode_pdf_text_fragment(match)
+        cleaned = re.sub(r"\s+", " ", decoded).strip()
+        if len(cleaned) >= 4 and re.search(r"[A-Za-z]", cleaned):
+            chunks.append(cleaned)
+    return chunks
 
 
 def _extract_pdf_text_without_dependencies(pdf_bytes: bytes) -> str:
@@ -337,15 +538,25 @@ def _extract_pdf_text_without_dependencies(pdf_bytes: bytes) -> str:
 
         for candidate in candidates:
             literal_strings = re.findall(rb"\((?:\\.|[^\\()])*\)", candidate)
+            hex_strings = re.findall(rb"<[0-9A-Fa-f\s]{4,}>", candidate)
             decoded_strings = []
             for item in literal_strings:
                 decoded = _decode_pdf_literal_string(item)
                 cleaned = re.sub(r"\s+", " ", decoded).strip()
                 if len(cleaned) >= 2 and re.search(r"[A-Za-z]", cleaned):
                     decoded_strings.append(cleaned)
+            for item in hex_strings:
+                decoded = _decode_pdf_hex_string(item)
+                cleaned = re.sub(r"\s+", " ", decoded).strip()
+                if len(cleaned) >= 2 and re.search(r"[A-Za-z]", cleaned):
+                    decoded_strings.append(cleaned)
+            decoded_strings.extend(_extract_printable_pdf_runs(candidate))
 
             if decoded_strings:
                 extracted_chunks.extend(decoded_strings)
+
+    if not extracted_chunks:
+        extracted_chunks.extend(_extract_printable_pdf_runs(pdf_bytes))
 
     if not extracted_chunks:
         return ""
@@ -359,7 +570,7 @@ def _extract_pdf_text_without_dependencies(pdf_bytes: bytes) -> str:
         seen.add(normalized)
         deduped.append(chunk)
 
-    return "\n".join(deduped[:400]).strip()
+    return _clean_extracted_pdf_text("\n".join(deduped[:500]))
 
 
 def _decode_pdf_data_url(data_url: str) -> bytes:
@@ -372,8 +583,375 @@ def _decode_pdf_data_url(data_url: str) -> bytes:
         return b""
 
 
+def _collapse_spaced_characters(value: str) -> str:
+    def _collapse_segment(segment: str) -> str:
+        piece = (segment or "").strip()
+        if not piece:
+            return ""
+        tokens = [token for token in re.split(r"\s+", piece) if token]
+        if len(tokens) < 2:
+            return piece
+
+        alpha_lengths = [len(re.sub(r"[^A-Za-z0-9]", "", token)) for token in tokens]
+        mostly_spelled = sum(1 for length in alpha_lengths if length <= 1) >= max(2, len(tokens) - 1)
+        if not mostly_spelled:
+            return piece
+
+        collapsed_piece = "".join(tokens)
+        collapsed_piece = re.sub(r"\(\s*", "(", collapsed_piece)
+        collapsed_piece = re.sub(r"\s*\)", ")", collapsed_piece)
+        collapsed_piece = re.sub(r"\s*([,.:;!?])", r"\1", collapsed_piece)
+        return collapsed_piece
+
+    normalized_lines = []
+    for raw_line in str(value or "").splitlines():
+        parts = re.split(r"(\s{2,})", raw_line)
+        rebuilt = []
+        for part in parts:
+            if re.fullmatch(r"\s{2,}", part or ""):
+                rebuilt.append(" ")
+            else:
+                rebuilt.append(_collapse_segment(part))
+        line = "".join(rebuilt)
+        line = re.sub(r"[ \t]{2,}", " ", line).strip()
+        normalized_lines.append(line)
+
+    return "\n".join(normalized_lines)
+
+
+def _canonical_resume_heading(line: str) -> str:
+    compact = re.sub(r"[^A-Z]", "", (line or "").upper())
+    heading_map = {
+        "CAREEROBJECTIVE": "CAREER OBJECTIVE",
+        "PROFESSIONALSUMMARY": "PROFESSIONAL SUMMARY",
+        "SUMMARY": "SUMMARY",
+        "PROFILE": "PROFILE",
+        "EDUCATIONALQUALIFICATION": "EDUCATIONAL QUALIFICATION",
+        "EDUCATIONALQUALIFICATIONS": "EDUCATIONAL QUALIFICATIONS",
+        "EDUCATION": "EDUCATION",
+        "TECHNICALSKILLS": "TECHNICAL SKILLS",
+        "SKILLS": "SKILLS",
+        "INTERNSHIPSPROJECTS": "INTERNSHIPS AND PROJECTS",
+        "INTERNSHIPSANDPROJECTS": "INTERNSHIPS AND PROJECTS",
+        "PROJECTSINTERNSHIPS": "PROJECTS AND INTERNSHIPS",
+        "PROJECTSANDINTERNSHIPS": "PROJECTS AND INTERNSHIPS",
+        "INTERNSHIPS": "INTERNSHIPS",
+        "INTERNSHIP": "INTERNSHIP",
+        "PROJECTS": "PROJECTS",
+        "PROJECT": "PROJECT",
+        "EXPERIENCE": "EXPERIENCE",
+        "WORKEXPERIENCE": "WORK EXPERIENCE",
+        "PROFESSIONALEXPERIENCE": "PROFESSIONAL EXPERIENCE",
+        "HOBBIES": "HOBBIES",
+        "INTERESTS": "INTERESTS",
+        "PERSONALDETAILS": "PERSONAL DETAILS",
+        "ACHIEVEMENTS": "ACHIEVEMENTS",
+        "ACHEIVEMENTS": "ACHIEVEMENTS",
+        "CERTIFICATIONS": "CERTIFICATIONS",
+        "DECLARATION": "DECLARATION",
+        "CURRICULUMVITAE": "CURRICULUM VITAE",
+    }
+    return heading_map.get(compact, "")
+
+
+def _normalize_resume_line(value: str) -> str:
+    line = str(value or "").replace("\x00", "").strip()
+    if not line:
+        return ""
+
+    line = _collapse_spaced_characters(line)
+    line = re.sub(r"(?<=\b[A-Za-z])[ \t]+(?=[A-Za-z]\b)", "", line)
+    line = line.replace("’", "'").replace("‘", "'").replace("“", '"').replace("”", '"')
+    line = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", line)
+    line = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", " ", line)
+    line = re.sub(r"\s*\|\s*", " | ", line)
+    line = re.sub(r"\s*,\s*", ", ", line)
+    line = re.sub(r"\s*:\s*", ": ", line)
+    line = re.sub(r"[ \t]{2,}", " ", line).strip(" -\t")
+
+    canonical_heading = _canonical_resume_heading(line)
+    if canonical_heading:
+        inline_match = re.match(rf"^{re.escape(canonical_heading)}\s*[:\-]\s*(.+)$", line, re.I)
+        if inline_match:
+            trailing_text = inline_match.group(1).strip()
+            if trailing_text:
+                return f"{canonical_heading}: {trailing_text}"
+        return canonical_heading
+
+    label_aliases = {
+        "LANGUAGESKNOWN": "Languages Known",
+        "TECHNICALSKILLS": "Technical Skills",
+        "CAREEROBJECTIVE": "Career Objective",
+        "EDUCATIONALQUALIFICATION": "Educational Qualification",
+        "EDUCATIONALQUALIFICATIONS": "Educational Qualifications",
+        "PERSONALDETAILS": "Personal Details",
+    }
+    compact_line = re.sub(r"[^A-Z]", "", line.upper())
+    for compact_prefix, label in label_aliases.items():
+        if compact_line.startswith(compact_prefix):
+            parts = re.split(r"\s*:\s*", line, maxsplit=1)
+            if len(parts) == 2:
+                return f"{label}: {parts[1].strip()}"
+            return label
+
+    return line.strip()
+
+
+def _prepare_resume_lines(value: str) -> list[str]:
+    prepared = []
+    previous = None
+    for raw_line in str(value or "").splitlines():
+        normalized_line = _normalize_resume_line(raw_line)
+        if not normalized_line:
+            continue
+        if normalized_line == previous:
+            continue
+        previous = normalized_line
+        prepared.append(normalized_line)
+
+    merged_prepared = []
+    index = 0
+    while index < len(prepared):
+        current = prepared[index]
+        next_line = prepared[index + 1] if index + 1 < len(prepared) else ""
+        third_line = prepared[index + 2] if index + 2 < len(prepared) else ""
+        if (
+            current in {"INTERNSHIPS", "INTERNSHIP", "PROJECTS", "PROJECT"}
+            and next_line == "&"
+            and third_line in {"INTERNSHIPS", "INTERNSHIP", "PROJECTS", "PROJECT"}
+        ):
+            if current.startswith("INTERNSHIP"):
+                merged_prepared.append("INTERNSHIPS AND PROJECTS")
+            else:
+                merged_prepared.append("PROJECTS AND INTERNSHIPS")
+            index += 3
+            continue
+        merged_prepared.append(current)
+        index += 1
+    return merged_prepared
+
+
+def _classify_resume_section_line(line: str) -> tuple[str, str]:
+    raw_line = str(line or "").strip()
+    if not raw_line:
+        return "", ""
+
+    canonical_line = _canonical_keyword(raw_line)
+    for section_name, keywords in RESUME_STRUCTURED_SECTION_KEYWORDS.items():
+        for keyword in keywords:
+            canonical_keyword = _canonical_keyword(keyword)
+            if canonical_line == canonical_keyword:
+                return section_name, ""
+            match = re.match(rf"^{re.escape(keyword)}\s*:\s*(.+)$", raw_line, re.I)
+            if match:
+                return section_name, match.group(1).strip()
+    return "", ""
+
+
+def _score_resume_line_for_section(line: str, section_name: str) -> int:
+    normalized = _normalize_resume_text(_collapse_spaced_characters(line))
+    lowered = normalized.lower()
+    if not normalized or normalized == "❖":
+        return -1
+
+    word_count = len(re.findall(r"[A-Za-z0-9+#]+", normalized))
+    education_hit = bool(
+        re.search(r"\b(college|school|university|b\.?tech|bachelor|master|degree|class|cbse|bput|matric|science)\b", lowered)
+    )
+    skill_hit = bool(_extract_resume_skills(normalized)) or bool(
+        re.search(r"\b(c#|c\+\+|c|html|css|javascript|java script|java|python|numpy|pandas|matplotlib|machine learning|artificial intelligence)\b", lowered)
+    )
+    hobby_hit = bool(re.search(r"\b(playing|singing|gardening|reading|writing|traveling|travelling|music|sports)\b", lowered))
+    experience_hit = bool(
+        re.search(r"\b(developed|contributed|worked|learned|designed|built|implemented|improved|created|driving|adopted)\b", lowered)
+    )
+    project_hit = bool(
+        re.search(r"\b(intern|internship|project|system|frontend|front-end|application|extension|machine learning|prediction|scheduling|drdo|range|establishment)\b", lowered)
+    )
+
+    score = 0
+    if section_name == "skills":
+        if skill_hit:
+            score += 6
+        if word_count <= 6 and not education_hit and not experience_hit:
+            score += 2
+        if hobby_hit or education_hit:
+            score -= 4
+    elif section_name == "hobbies":
+        if hobby_hit:
+            score += 6
+        if word_count <= 4 and not skill_hit and not education_hit:
+            score += 2
+        if skill_hit or education_hit:
+            score -= 4
+    elif section_name == "education":
+        if education_hit:
+            score += 7
+        if re.search(r"\b(2020|2021|2022|2023|2024|2025|2026|present|continuing)\b", lowered):
+            score += 1
+        if skill_hit or hobby_hit:
+            score -= 3
+    elif section_name == "experience":
+        if experience_hit:
+            score += 6
+        if word_count >= 8:
+            score += 1
+        if education_hit or hobby_hit:
+            score -= 3
+    elif section_name in {"projects", "projects_internships", "internships"}:
+        if project_hit:
+            score += 6
+        if re.search(r"\b(member|ambassador|attendee|facilitator)\b", lowered) and not project_hit:
+            score -= 5
+    elif section_name == "objective":
+        if lowered.startswith("to ") or word_count >= 12:
+            score += 4
+    return score
+
+
+def _pick_pending_resume_section(line: str, pending_sections: list[str]) -> str:
+    scored = []
+    for index, section_name in enumerate(pending_sections):
+        score = _score_resume_line_for_section(line, section_name)
+        if score > 0:
+            scored.append((score, -index, section_name))
+    return max(scored)[2] if scored else ""
+
+
+def _build_resume_section_blocks(text: str) -> dict[str, list[str]]:
+    blocks: dict[str, list[str]] = {}
+    current_section = ""
+    inline_only_sections = {"languages", "hobbies"}
+    pending_sections: list[str] = []
+    previous_was_heading = False
+
+    for line in _prepare_resume_lines(text):
+        section_name, trailing = _classify_resume_section_line(line)
+        if section_name:
+            blocks.setdefault(section_name, [])
+            if trailing:
+                blocks[section_name].append(trailing)
+            if previous_was_heading and not trailing:
+                if section_name not in pending_sections:
+                    pending_sections.append(section_name)
+                current_section = ""
+            else:
+                pending_sections = [section_name] if not trailing else []
+                current_section = "" if section_name in inline_only_sections and trailing else section_name
+            previous_was_heading = True
+            continue
+
+        previous_was_heading = False
+
+        if len(pending_sections) > 1:
+            matched_section = _pick_pending_resume_section(line, pending_sections)
+            if matched_section:
+                blocks.setdefault(matched_section, []).append(line)
+                current_section = matched_section
+                continue
+
+        if current_section:
+            blocks.setdefault(current_section, []).append(line)
+
+    return blocks
+
+
+def _get_resume_section_lines(text: str, section_names: list[str], limit: int | None = None) -> list[str]:
+    blocks = _build_resume_section_blocks(text)
+    collected = []
+    seen = set()
+    for section_name in section_names:
+        for item in blocks.get(section_name, []):
+            cleaned = str(item or "").strip()
+            canonical = _canonical_keyword(cleaned)
+            if not cleaned or not canonical or canonical in seen:
+                continue
+            seen.add(canonical)
+            collected.append(cleaned)
+            if limit and len(collected) >= limit:
+                return collected[:limit]
+    return collected[:limit] if limit else collected
+
+
+def _prepare_resume_text_for_analysis(value: str) -> str:
+    prepared_lines = _prepare_resume_lines(value)
+    return "\n".join(prepared_lines).strip()
+
+
+def _prepare_resume_text_for_display(value: str) -> str:
+    cleaned = _prepare_resume_text_for_analysis(value)
+    if not cleaned:
+        return ""
+
+    normalized = cleaned.lower()
+    normalized = re.sub(r"\s*&\s*", " and ", normalized)
+    normalized = re.sub(r"[^\w\s@.+,#:/()-]", " ", normalized)
+    normalized = _insert_resume_heading_breaks(normalized)
+    normalized = re.sub(r"\s*\n\s*", "\n", normalized)
+    normalized = re.sub(r"[ \t]+", " ", normalized)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    return normalized.strip()
+
+
 def _normalize_resume_text(value: str) -> str:
-    return re.sub(r"\s+", " ", (value or "")).strip()
+    raw = _prepare_resume_text_for_analysis(value)
+    raw = re.sub(r"(?<=\b[A-Z])[ \t]+(?=[A-Z]\b)", "", raw)
+    raw = re.sub(r"\s+", " ", raw)
+    return raw.strip()
+
+
+def _dedupe_text_list(values: list[str]) -> list[str]:
+    deduped = []
+    seen = set()
+    for item in values or []:
+        cleaned = _normalize_resume_text(str(item or ""))
+        canonical = cleaned.lower()
+        if not cleaned or canonical in seen:
+            continue
+        seen.add(canonical)
+        deduped.append(cleaned)
+    return deduped
+
+
+def _normalize_contact_text(value: str) -> str:
+    raw = str(value or "")
+    collapsed = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", raw)
+    collapsed = re.sub(r"\s*@\s*", "@", collapsed)
+    collapsed = re.sub(r"\s*\.\s*", ".", collapsed)
+    collapsed = re.sub(r"([A-Za-z0-9._%+-])\s+(?=[A-Za-z0-9._%+-]*@)", r"\1", collapsed)
+    collapsed = re.sub(r"(?<=@)\s+", "", collapsed)
+    collapsed = re.sub(r"\s+(?=\.)", "", collapsed)
+    collapsed = re.sub(r"(?<=\.)\s+", "", collapsed)
+    return collapsed
+
+
+def _extract_resume_emails(text: str) -> list[str]:
+    normalized_text = _normalize_contact_text(text)
+    emails = re.findall(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", normalized_text, re.I)
+    deduped = []
+    seen = set()
+    for email in emails:
+        cleaned = email.strip(".,;:()[]{}<> ").lower()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        deduped.append(cleaned)
+    return deduped
+
+
+def _extract_resume_phones(text: str) -> list[str]:
+    normalized_text = _normalize_contact_text(text)
+    phones = re.findall(r"(\+?\d[\d\s().-]{8,}\d)", normalized_text)
+    deduped = []
+    seen = set()
+    for phone in phones:
+        cleaned = re.sub(r"\s+", " ", phone).strip()
+        canonical = re.sub(r"\D", "", cleaned)
+        if len(canonical) < 10 or canonical in seen:
+            continue
+        seen.add(canonical)
+        deduped.append(cleaned)
+    return deduped
 
 
 def _resume_signal_details(text: str, file_name: str = "") -> dict:
@@ -383,9 +961,11 @@ def _resume_signal_details(text: str, file_name: str = "") -> dict:
     skill_hits = _extract_resume_skills(text)
     section_hits = [keyword for keyword in RESUME_SECTION_KEYWORDS if keyword in lowered]
     word_count = len([word for word in normalized.split(" ") if word])
+    extracted_emails = _extract_resume_emails(text)
+    extracted_phones = _extract_resume_phones(text)
 
-    has_email = bool(re.search(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", text, re.I))
-    has_phone = bool(re.search(r"(\+?\d[\d\s().-]{8,}\d)", text))
+    has_email = bool(extracted_emails)
+    has_phone = bool(extracted_phones)
     has_profile_link = bool(re.search(r"(linkedin|github|portfolio)", lowered))
     has_education = bool(re.search(r"\b(bachelor|master|b\.tech|m\.tech|degree|university|college|school)\b", lowered))
     has_experience = bool(re.search(r"\b(intern|internship|experience|engineer|developer|manager|analyst|specialist|coordinator|student|worked|employment|company|consultant|associate|executive)\b", lowered))
@@ -394,6 +974,33 @@ def _resume_signal_details(text: str, file_name: str = "") -> dict:
     has_achievement_language = bool(re.search(r"\b(led|improved|increased|reduced|optimized|delivered|managed|launched|achieved)\b", lowered))
     has_dates = bool(re.search(r"\b(19|20)\d{2}\b", lowered))
     filename_says_resume = any(token in filename for token in ["resume", "cv", "curriculum vitae"])
+    academic_document_hits = _dedupe_text_list([
+        keyword
+        for keyword in [
+            "marksheet",
+            "mark sheet",
+            "transcript",
+            "statement of marks",
+            "grade sheet",
+            "report card",
+            "hall ticket",
+            "admit card",
+            "subject code",
+            "marks obtained",
+            "maximum marks",
+            "credit points",
+            "sgpa",
+            "cgpa",
+            "gpa",
+            "semester",
+            "roll no",
+            "roll number",
+            "registration number",
+            "enrollment number",
+        ]
+        if keyword in lowered
+    ])
+    has_academic_record_language = bool(academic_document_hits)
 
     score = 0
     if filename_says_resume:
@@ -424,6 +1031,8 @@ def _resume_signal_details(text: str, file_name: str = "") -> dict:
         score += 1
     if word_count >= 180:
         score += 1
+    if has_academic_record_language and not (has_experience or has_project or has_profile_link):
+        score -= 3
 
     return {
         "normalized": normalized,
@@ -434,12 +1043,16 @@ def _resume_signal_details(text: str, file_name: str = "") -> dict:
         "has_resume_heading": has_resume_heading,
         "has_email": has_email,
         "has_phone": has_phone,
+        "emails": extracted_emails,
+        "phones": extracted_phones,
         "has_profile_link": has_profile_link,
         "has_education": has_education,
         "has_experience": has_experience,
         "has_project": has_project,
         "has_achievement_language": has_achievement_language,
         "has_dates": has_dates,
+        "has_academic_record_language": has_academic_record_language,
+        "academic_document_hits": academic_document_hits,
         "skill_hits": skill_hits,
         "section_hits": section_hits,
     }
@@ -448,10 +1061,42 @@ def _resume_signal_details(text: str, file_name: str = "") -> dict:
 def _looks_like_resume(text: str, file_name: str = "") -> tuple[bool, str]:
     details = _resume_signal_details(text, file_name)
 
+    contact_signals = int(details["has_email"]) + int(details["has_phone"]) + int(details["has_profile_link"])
+    core_resume_signals = int(details["has_education"]) + int(details["has_experience"]) + int(details["has_project"])
+    section_signal_count = len(details["section_hits"])
+    strong_resume_evidence = (
+        (contact_signals >= 1 and (details["has_experience"] or details["has_project"])) or
+        (details["has_experience"] and bool(details["skill_hits"])) or
+        (details["has_project"] and bool(details["skill_hits"])) or
+        (section_signal_count >= 2 and contact_signals >= 1) or
+        (details["filename_says_resume"] and contact_signals >= 1) or
+        (details["has_resume_heading"] and contact_signals >= 1)
+    )
+
     if details["text_length"] < 25 and not details["filename_says_resume"]:
         return False, "This file does not contain enough readable content to verify it as a resume or CV."
 
+    academic_hits = len(details["academic_document_hits"] or [])
+    if details["has_academic_record_language"] and academic_hits >= 3 and not strong_resume_evidence:
+        return False, (
+            "This PDF looks more like an academic document such as a marksheet or transcript than a resume. "
+            "Please upload a text-based resume PDF."
+        )
+
     if details["score"] >= 4:
+        return True, ""
+
+    fresher_resume_like = (
+        details["word_count"] >= 35 and
+        (
+            (contact_signals >= 1 and core_resume_signals >= 1) or
+            (contact_signals >= 1 and section_signal_count >= 1) or
+            (details["has_education"] and details["skill_hits"]) or
+            (details["has_project"] and details["skill_hits"]) or
+            (details["has_experience"] and details["has_dates"])
+        )
+    )
+    if fresher_resume_like:
         return True, ""
 
     short_resume_like = (
@@ -489,17 +1134,242 @@ def _looks_like_resume(text: str, file_name: str = "") -> tuple[bool, str]:
     if longer_resume_like:
         return True, ""
 
+    missing_hints = []
+    if contact_signals == 0:
+        missing_hints.append("contact details like email, phone, or LinkedIn")
+    if section_signal_count == 0 and core_resume_signals == 0:
+        missing_hints.append("resume sections like Skills, Education, Experience, or Projects")
+    if details["word_count"] < 35:
+        missing_hints.append("enough readable resume text")
+
+    if missing_hints:
+        return (
+            False,
+            "This PDF does not appear to be a resume yet. Please upload a text-based resume PDF with "
+            + ", ".join(missing_hints)
+            + ".",
+        )
+
     return False, "This document does not look like a resume or CV. Please upload a proper resume/CV file."
 
 
 def _extract_resume_skills(text: str) -> list[str]:
     normalized = _normalize_resume_text(text).lower()
+    display_map = {
+        "html": "HTML",
+        "css": "CSS",
+        "javascript": "JavaScript",
+        "java script": "JavaScript",
+        "java": "Java",
+        "python": "Python",
+        "numpy": "NumPy",
+        "num py": "NumPy",
+        "pandas": "Pandas",
+        "matplotlib": "Matplotlib",
+    }
     found = []
     for skill in KNOWN_RESUME_SKILLS:
         pattern = r"\b" + re.escape(skill.lower()) + r"\b"
         if re.search(pattern, normalized):
-            found.append(skill.title() if skill.islower() else skill)
-    return found[:24]
+            found.append(display_map.get(skill.lower(), skill.title() if skill.islower() else skill))
+
+    extra_skill_aliases = {
+        "javascript (basics)": "JavaScript",
+        "java script": "JavaScript",
+        "java (basics)": "Java",
+        "data preprocessing": "Data Preprocessing",
+        "datapreprocessing": "Data Preprocessing",
+        "data cleaning": "Data Cleaning",
+        "matplotlib": "Matplotlib",
+        "numpy": "NumPy",
+        "num py": "NumPy",
+        "pandas": "Pandas",
+    }
+    for alias, label in extra_skill_aliases.items():
+        if alias in normalized:
+            found.append(label)
+    deduped = []
+    seen = set()
+    for item in found:
+        canonical = _canonical_keyword(item)
+        if not canonical or canonical in seen:
+            continue
+        seen.add(canonical)
+        deduped.append(item)
+    return deduped[:24]
+
+
+def _format_resume_skill_label(value: str) -> str:
+    canonical = _canonical_keyword(value)
+    if not canonical:
+        return ""
+    label_map = {
+        "html": "HTML",
+        "css": "CSS",
+        "javascript": "JavaScript",
+        "javascript basics": "JavaScript (Basics)",
+        "java": "Java",
+        "java basics": "Java (Basics)",
+        "python": "Python",
+        "numpy": "NumPy",
+        "pandas": "Pandas",
+        "matplotlib": "Matplotlib",
+        "data preprocessing": "Data Preprocessing",
+        "datapreprocessing": "Data Preprocessing",
+        "datapreprocessing cleaning": "Data Cleaning",
+        "data cleaning": "Data Cleaning",
+    }
+    if canonical in label_map:
+        return label_map[canonical]
+    fuzzy_prefixes = [
+        ("matplot", "Matplotlib"),
+        ("matpl", "Matplotlib"),
+        ("pand", "Pandas"),
+        ("nump", "NumPy"),
+        ("pyth", "Python"),
+        ("javasc", "JavaScript"),
+        ("java script", "JavaScript"),
+        ("javascript basic", "JavaScript (Basics)"),
+        ("java basic", "Java (Basics)"),
+        ("jav", "Java"),
+        ("html", "HTML"),
+        ("css", "CSS"),
+        ("data preprocess", "Data Preprocessing"),
+        ("preprocess", "Data Preprocessing"),
+        ("data clean", "Data Cleaning"),
+        ("cleaning", "Data Cleaning"),
+    ]
+    for prefix, label in fuzzy_prefixes:
+        if canonical.startswith(prefix):
+            return label
+    return str(value).strip()
+
+
+def _extract_skill_items_from_section_lines(lines: list[str], limit: int = 12) -> list[str]:
+    if not lines:
+        return []
+
+    merged_lines = []
+    for raw_line in lines:
+        cleaned = _normalize_resume_text(raw_line).strip(" .,-|")
+        if not cleaned:
+            continue
+        if cleaned.startswith("&") and merged_lines:
+            merged_lines[-1] = f"{merged_lines[-1]} {cleaned}".strip()
+        else:
+            merged_lines.append(cleaned)
+
+    found = []
+    seen = set()
+    for line in merged_lines:
+        candidates = [part.strip() for part in re.split(r"\s*,\s*", line) if part.strip()]
+        if not candidates:
+            candidates = [line]
+
+        expanded = []
+        for candidate in candidates:
+            if "&" in candidate:
+                amp_parts = [part.strip() for part in candidate.split("&") if part.strip()]
+                if len(amp_parts) == 2:
+                    left_label = _format_resume_skill_label(amp_parts[0]) or amp_parts[0]
+                    expanded.append(left_label)
+                    right_tokens = amp_parts[1].split()
+                    if len(right_tokens) == 1 and left_label.split():
+                        expanded.append(f"{left_label.split()[0]} {amp_parts[1]}")
+                    else:
+                        expanded.append(amp_parts[1])
+                    continue
+            expanded.append(candidate)
+
+        for candidate in expanded:
+            label = _format_resume_skill_label(candidate)
+            canonical = _canonical_keyword(label)
+            if not canonical or canonical in seen:
+                continue
+            seen.add(canonical)
+            found.append(label)
+            if len(found) >= limit:
+                return found
+    if "JavaScript (Basics)" in found and "JavaScript" in found:
+        found = [item for item in found if item != "JavaScript"]
+    if "Java (Basics)" in found and "Java" in found:
+        found = [item for item in found if item != "Java"]
+    return found[:limit]
+
+
+def _extract_project_section_items(lines: list[str], limit: int = 6, internships_only: bool = False) -> list[str]:
+    if not lines:
+        return []
+
+    merged = []
+    for raw_line in lines:
+        cleaned = _normalize_resume_text(_collapse_spaced_characters(raw_line)).strip(" .,-|")
+        if not cleaned:
+            continue
+        if (
+            merged
+            and (
+                merged[-1].rstrip().endswith(("(", "-", "/", "|", ","))
+                or re.match(r"^['\"(,./0-9-]", cleaned)
+            )
+        ):
+            merged[-1] = f"{merged[-1]} {cleaned}".strip()
+        else:
+            merged.append(cleaned)
+
+    items = []
+    seen = set()
+    for item in merged:
+        if not re.search(r"[A-Za-z]", item):
+            continue
+        if (
+            re.search(r"\b(member|ambassador|attendee|facilitator)\b", item, re.I)
+            and not re.search(r"\b(intern|internship|project|system|application|extension|frontend|front-end|prediction|scheduling)\b", item, re.I)
+        ):
+            continue
+        if internships_only and not re.search(r"\b(intern|internship|trainee)\b", item, re.I):
+            continue
+        canonical = _canonical_keyword(item)
+        if not canonical or canonical in seen:
+            continue
+        seen.add(canonical)
+        items.append(item)
+        if len(items) >= limit:
+            break
+    return items[:limit]
+
+
+def _extract_section_entries(lines: list[str], limit: int = 6) -> list[str]:
+    if not lines:
+        return []
+
+    merged = []
+    for raw_line in lines:
+        cleaned = _normalize_resume_text(_collapse_spaced_characters(raw_line)).strip(" .,-|")
+        if not cleaned:
+            continue
+        if (
+            merged
+            and (
+                merged[-1].rstrip().endswith(("(", "-", "/", "|", ","))
+                or re.match(r"^['\"(,./0-9-]", cleaned)
+            )
+        ):
+            merged[-1] = f"{merged[-1]} {cleaned}".strip()
+        else:
+            merged.append(cleaned)
+
+    entries = []
+    seen = set()
+    for item in merged:
+        canonical = _canonical_keyword(item)
+        if not canonical or canonical in seen:
+            continue
+        seen.add(canonical)
+        entries.append(item)
+        if len(entries) >= limit:
+            break
+    return entries[:limit]
 
 
 def _extract_resume_lines(text: str, limit: int = 8) -> list[str]:
@@ -534,21 +1404,41 @@ def _extract_resume_lines_smart(text: str, limit: int = 8) -> list[str]:
 def _build_resume_analysis_payload(text: str, file_name: str = "") -> dict:
     normalized = _normalize_resume_text(text)
     lines = _extract_resume_lines_smart(text, limit=20)
-    skills = _extract_resume_skills(text)
+    section_skills = _extract_skills_section_items(text, limit=12)
+    skills = []
+    seen_skills = set()
+    for item in section_skills:
+        label = _format_resume_skill_label(item)
+        canonical = _canonical_keyword(label)
+        if not canonical or canonical in seen_skills:
+            continue
+        seen_skills.add(canonical)
+        skills.append(label)
+    if "JavaScript (Basics)" in skills:
+        skills = [item for item in skills if item != "JavaScript"]
+    if "Java (Basics)" in skills:
+        skills = [item for item in skills if item != "Java"]
+    skills = skills[:24]
     signal_details = _resume_signal_details(text, file_name)
 
     education = [
         line for line in lines
         if re.search(r"\b(university|college|bachelor|master|degree|b\.tech|m\.tech|school)\b", line, re.I)
     ][:5]
-    experience = [
-        line for line in lines
-        if re.search(r"\b(experience|intern|engineer|developer|manager|analyst|specialist|worked|company)\b", line, re.I)
-    ][:6]
-    projects = [
-        line for line in lines
-        if re.search(r"\b(project|developed|built|created|implemented|designed)\b", line, re.I)
-    ][:6]
+    experience = _extract_section_entries(
+        _get_resume_section_lines(
+            text,
+            ["experience"],
+            limit=12,
+        ),
+        limit=6,
+    )
+    project_section_lines = _get_resume_section_lines(
+        text,
+        ["projects_internships", "projects", "internships"],
+        limit=12,
+    )
+    projects = _extract_project_section_items(project_section_lines, limit=6, internships_only=False)
 
     likely_name = lines[0] if lines else ""
     if re.search(r"(resume|cv|education|skills|experience)", likely_name, re.I):
@@ -569,7 +1459,7 @@ def _build_resume_analysis_payload(text: str, file_name: str = "") -> dict:
         "education": education,
         "experience_highlights": experience,
         "project_highlights": projects,
-        "contact_found": bool(re.search(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", text, re.I)),
+        "contact_found": signal_details["has_email"] or signal_details["has_phone"],
         "section_hits": signal_details["section_hits"],
         "resume_signal_score": signal_details["score"],
         "analysis_text": "\n".join(analysis_parts)[:4000],
@@ -582,6 +1472,699 @@ def _build_resume_analysis_payload(text: str, file_name: str = "") -> dict:
             ] if role
         ][:4],
         "source_file_name": file_name,
+    }
+
+
+def _extract_resume_section_block(text: str, heading_patterns: list[str], limit: int = 6) -> list[str]:
+    lines = [line.strip(" -\t:") for line in _prepare_resume_text_for_analysis(text).splitlines()]
+    cleaned_lines = [line for line in lines if line]
+    if not cleaned_lines:
+        return []
+
+    section_heading_pattern = re.compile(
+        r"^(summary|objective|profile|experience|professional experience|work history|work experience|education|educational qualification|educational qualifications|academic|skills|technical skills|projects|internships and projects|internships|certifications|achievements|certificates|technologies|internship|hobbies|interests|extra curricular|extracurricular activities?|personal details|declaration|curriculum vitae)\b[:\s-]*$",
+        re.I,
+    )
+    heading_line_matcher = re.compile(
+        r"^(?P<heading>(?:"
+        + "|".join(heading_patterns)
+        + r"))(?:\s*[:\-|]\s*(?P<trailing>.*))?$",
+        re.I,
+    )
+
+    extracted = []
+    capture = False
+    for line in cleaned_lines:
+        normalized_line = re.sub(r"\s+", " ", line).strip()
+        if not normalized_line:
+            continue
+
+        heading_hit = heading_line_matcher.match(normalized_line)
+        if heading_hit:
+            capture = True
+            trailing = (heading_hit.group("trailing") or "").strip(" :-|")
+            if trailing.upper() in {"AND PROJECTS", "& PROJECTS"}:
+                trailing = ""
+            if trailing:
+                extracted.append(trailing)
+            continue
+
+        if capture and section_heading_pattern.search(normalized_line):
+            break
+
+        if capture and len(normalized_line.split()) >= 1:
+            if (
+                extracted
+                and (
+                    extracted[-1].rstrip().endswith(("(", "-", "/", "|", ","))
+                    or re.match(r"^['\"(,./0-9-]", normalized_line)
+                )
+            ):
+                extracted[-1] = f"{extracted[-1]} {normalized_line}".strip()
+            else:
+                extracted.append(normalized_line)
+            if len(extracted) >= limit:
+                break
+
+    deduped = []
+    seen = set()
+    for item in extracted:
+        canonical = _canonical_keyword(item)
+        if not canonical or canonical in seen:
+            continue
+        seen.add(canonical)
+        deduped.append(item)
+    return deduped[:limit]
+
+
+def _extract_inline_section_items(
+    text: str,
+    heading_patterns: list[str],
+    stop_headings: list[str],
+    limit: int = 6,
+) -> list[str]:
+    normalized = _normalize_resume_text(text)
+    if not normalized:
+        return []
+
+    heading_pattern = "(?:" + "|".join(heading_patterns) + ")"
+    stop_pattern = "(?:" + "|".join(stop_headings) + ")"
+    match = re.search(
+        rf"{heading_pattern}\s*[:\-]\s*(.+?)(?=\s+(?:{stop_pattern})\s*[:\-]|\Z)",
+        normalized,
+        re.I,
+    )
+    if not match:
+        return []
+
+    raw_section = match.group(1).strip()
+    candidates = re.split(r"[|;,]|(?:\s{2,})", raw_section)
+    extracted = []
+    seen = set()
+    for item in candidates:
+        cleaned = _normalize_resume_text(item).strip(" .-:")
+        canonical = _canonical_keyword(cleaned)
+        if not canonical or canonical in seen:
+            continue
+        seen.add(canonical)
+        extracted.append(cleaned)
+        if len(extracted) >= limit:
+            break
+    return extracted[:limit]
+
+
+def _extract_skills_section_items(text: str, limit: int = 12) -> list[str]:
+    section_items = _get_resume_section_lines(text, ["skills"], limit=limit + 8)
+    section_text = "\n".join(section_items)
+    section_skills = _extract_skill_items_from_section_lines(section_items, limit=limit)
+    detected_skills = _extract_resume_skills(section_text)
+    merged = []
+    seen = set()
+    for item in section_skills + detected_skills:
+        label = _format_resume_skill_label(item)
+        canonical = _canonical_keyword(label)
+        if not canonical or canonical in seen:
+            continue
+        seen.add(canonical)
+        merged.append(label)
+    return merged[:limit]
+
+
+def _extract_resume_section_details(
+    text: str,
+    heading_patterns: list[str],
+    fallback_pattern: str,
+    stop_headings: list[str],
+    limit: int = 6,
+) -> list[str]:
+    section_items = _extract_resume_section_block(text, heading_patterns, limit=limit)
+    inline_items = _extract_inline_section_items(text, heading_patterns, stop_headings, limit=limit)
+    line_items = [
+        line for line in _extract_resume_lines_smart(text, limit=24)
+        if re.search(fallback_pattern, line, re.I)
+    ][:limit]
+
+    deduped = []
+    seen = set()
+    for item in section_items + inline_items + line_items:
+        cleaned = _normalize_resume_text(item)
+        canonical = _canonical_keyword(cleaned)
+        if not canonical or canonical in seen:
+            continue
+        seen.add(canonical)
+        deduped.append(cleaned)
+    return deduped[:limit]
+
+
+def _extract_resume_hobbies(text: str) -> list[str]:
+    hr_context_keywords = {
+        "age", "gender", "marital", "status", "availability", "date of birth", "dob",
+        "nationality", "visa", "salary", "ctc", "notice", "location", "city",
+        "phone", "email", "linkedin", "github", "portfolio", "website",
+        "willing", "relocate", "travel", "languages", "certifications"
+    }
+    
+    objective_keywords = {
+        "work", "seeking", "looking", "pursue", "career", "professional", "goal",
+        "objective", "develop", "enhance", "utilize", "leverage", "contribute",
+        "deliver", "results", "skills", "abilities", "expertise", "experience",
+        "opportunity", "role", "position", "organization", "company", "team",
+        "dynamic environment", "fast-paced", "growth", "challenging"
+    }
+    
+    resume_section_headings = {
+        "objective", "career objective", "professional summary", "summary", "profile",
+        "education", "experience", "work experience", "skills", "technical skills",
+        "projects", "internships", "achievements", "declaration", "personal details",
+        "certifications", "languages known", "interests", "extracurricular"
+    }
+    
+    def _is_valid_hobby(item: str) -> bool:
+        """Check if item is a valid hobby (not HR context, objective, or heading)"""
+        if not item:
+            return False
+            
+        normalized = _normalize_resume_text(item).lower()
+        
+        # Filter HR context keywords
+        for keyword in hr_context_keywords:
+            if keyword in normalized:
+                return False
+        
+        # Filter professional objective keywords (indicates objective text, not hobby)
+        # Only filter if multiple professional keywords appear (to avoid false positives)
+        professional_keyword_count = sum(1 for keyword in objective_keywords if keyword in normalized)
+        if professional_keyword_count >= 3:  # Multiple career-related words = not a hobby
+            return False
+        
+        # Filter section headings
+        for heading in resume_section_headings:
+            if heading in normalized:
+                return False
+        
+        # Filter all-caps names (multiple characters, all uppercase, no spaces like "BHABABHANJANPANDA")
+        if item.isupper() and len(item) > 6 and ' ' not in item:
+            return False
+        
+        # Filter very long entries (likely paragraph text, not hobbies)
+        if len(normalized.split()) > 20:
+            return False
+            
+        return True
+    
+    structured_items = _get_resume_section_lines(text, ["hobbies"], limit=6)
+    if structured_items:
+        items = []
+        seen = set()
+        for entry in structured_items:
+            for part in re.split(r",|/|\||;", entry):
+                cleaned = _normalize_resume_text(part).strip(" .-")
+                canonical = _canonical_keyword(cleaned)
+                if not canonical or canonical in seen or not _is_valid_hobby(cleaned):
+                    continue
+                seen.add(canonical)
+                items.append(cleaned)
+        if items:
+            return items[:6]
+
+    for line in _prepare_resume_lines(text):
+        match = re.match(r"^(?:Hobbies|Interests)\s*:\s*(.+)$", line, re.I)
+        if not match:
+            continue
+        raw_items = re.split(r",|/|\||;", match.group(1))
+        hobbies = []
+        seen = set()
+        for item in raw_items:
+            cleaned = _normalize_resume_text(item).strip(" .-")
+            canonical = _canonical_keyword(cleaned)
+            if not canonical or canonical in seen or not _is_valid_hobby(cleaned):
+                continue
+            seen.add(canonical)
+            hobbies.append(cleaned)
+        if hobbies:
+            return hobbies[:6]
+
+    section_items = _extract_resume_section_block(
+        text,
+        [
+            r"\bhobbies\b",
+            r"\binterests\b",
+            r"\bextra[\s-]*curricular\b",
+            r"\bextracurricular activities?\b",
+        ],
+        limit=6,
+    )
+    if section_items:
+        # Filter out invalid hobbies (names, headings, HR context, professional objectives)
+        filtered = []
+        for item in section_items:
+            if _is_valid_hobby(item):
+                filtered.append(item)
+        if filtered:
+            return filtered[:6]
+
+    normalized = _normalize_resume_text(text)
+    inline_match = re.search(
+        r"\b(?:hobbies|interests)\b\s*[:\-]\s*([^.|\n]{4,240})",
+        normalized,
+        re.I,
+    )
+    if not inline_match:
+        return []
+
+    raw_items = re.split(r",|/|\||;|\s{2,}", inline_match.group(1))
+    hobbies = []
+    seen = set()
+    for item in raw_items:
+        cleaned = _normalize_resume_text(item).strip(" .-")
+        canonical = _canonical_keyword(cleaned)
+        if not canonical or canonical in seen or not _is_valid_hobby(cleaned):
+            continue
+        seen.add(canonical)
+        hobbies.append(cleaned)
+    return hobbies[:6]
+
+
+def _add_spaces_to_concatenated_text(text: str) -> str:
+    """
+    Intelligently add spaces to text that has been concatenated (spaces removed).
+    Uses greedy word matching with a comprehensive dictionary.
+    """
+    if not text or len(text) < 2:
+        return text
+    
+    text = text.lower()
+    
+    # Comprehensive word dictionary, sorted by length (longest first for greedy matching)
+    words = [
+        # Long words
+        "continuously", "developing", "environment", "abilities", "creativity", 
+        "problem-solving", "problem", "solving", "deliver", "quality", "results",
+        "experience", "professional", "organization", "opportunity", "challenge",
+        # Medium words
+        "work", "working", "where", "while", "utilize", "ability", "creative",
+        "develop", "learning", "high", "best", "well", "good", "dynamic",
+        "skills", "goal", "seek", "help", "lead", "build", "improve",
+        "playing", "reading", "writing", "singing", "dancing", "cooking",
+        # Common short words
+        "to", "in", "a", "and", "can", "my", "i", "is", "be", "new",
+        "of", "at", "by", "or", "an", "it", "on", "as", "we", "me",
+        "no", "up", "do", "go", "so", "if", "the", "for", "with",
+        "from", "that", "this", "your", "our", "but", "not", "all",
+    ]
+    
+    words.sort(key=len, reverse=True)  # Longest first
+    
+    result = []
+    i = 0
+    
+    while i < len(text):
+        matched = False
+        
+        # Try to match words starting from current position
+        for word in words:
+            if text[i:i+len(word)] == word:
+                result.append(word)
+                i += len(word)
+                matched = True
+                break
+        
+        if not matched:
+            # No word matched, take single character and continue
+            result.append(text[i])
+            i += 1
+    
+    # Join with spaces and clean up
+    output = ' '.join(result)
+    # Fix spacing around hyphens and punctuation
+    output = re.sub(r'\s*-\s*', '-', output)
+    output = re.sub(r'\s+', ' ', output)
+    
+    return output.strip()
+
+
+def _extract_resume_objective(text: str) -> str:
+    # Try to extract directly from raw text before aggressive processing
+    raw_lines = str(text or "").splitlines()
+    
+    # Look for objective heading and get following lines
+    for i, line in enumerate(raw_lines):
+        section_name, trailing = _classify_resume_section_line(line)
+        if section_name == "objective":
+            if trailing:
+                # Inline: "Career Objective: text here"
+                obj_text = trailing[:420]
+            else:
+                # Heading on separate line, collect following lines
+                obj_lines = []
+                for j in range(i + 1, min(i + 5, len(raw_lines))):
+                    next_line = raw_lines[j].strip()
+                    if not next_line:
+                        continue
+                    # Stop if we hit another section heading
+                    next_section, _ = _classify_resume_section_line(next_line)
+                    if next_section:
+                        break
+                    obj_lines.append(next_line)
+                
+                if not obj_lines:
+                    continue
+                obj_text = " ".join(obj_lines)[:420]
+            
+            if not obj_text:
+                continue
+            
+            # Clean OCR artifacts: remove scattered spaces and reconstruct
+            # Step 1: Remove all spaces first to get the concatenated text
+            obj_cleaned = re.sub(r'\s+', '', obj_text)
+            
+            # Step 2: Add spaces intelligently using word dictionary
+            obj_spaced = _add_spaces_to_concatenated_text(obj_cleaned)
+            
+            # Step 3: Capitalize first letter
+            if obj_spaced:
+                obj_spaced = obj_spaced[0].upper() + obj_spaced[1:]
+            
+            return obj_spaced.strip()
+    
+    return ""
+
+
+def _extract_resume_achievements(text: str) -> list[str]:
+    structured_items = _get_resume_section_lines(text, ["achievements"], limit=6)
+    if structured_items:
+        return structured_items[:6]
+
+    return _extract_resume_section_details(
+        text,
+        [
+            r"\bachievements\b",
+            r"\bkey achievements\b",
+            r"\baccomplishments\b",
+        ],
+        r"\b(member|ambassador|attendee|award|achievement|leadership|facilitator)\b",
+        [
+            r"\bprojects\b",
+            r"\binternships?\b",
+            r"\bexperience\b",
+            r"\beducation\b",
+            r"\bskills\b",
+            r"\btechnical skills\b",
+            r"\bhobbies\b",
+            r"\binterests\b",
+            r"\bpersonal details\b",
+            r"\bdeclaration\b",
+        ],
+        limit=6,
+    )
+
+
+def _extract_resume_languages(text: str) -> list[str]:
+    structured_items = _get_resume_section_lines(text, ["languages"], limit=3)
+    if structured_items:
+        items = []
+        seen = set()
+        for entry in structured_items:
+            for part in re.split(r",|/|\||;", entry):
+                cleaned = _normalize_resume_text(part).strip(" .-")
+                canonical = _canonical_keyword(cleaned)
+                if not canonical or canonical in seen:
+                    continue
+                seen.add(canonical)
+                items.append(cleaned.title())
+        if items:
+            return items[:6]
+
+    for line in _prepare_resume_lines(text):
+        match = re.match(r"^Languages Known\s*:\s*(.+)$", line, re.I)
+        if not match:
+            continue
+        items = re.split(r",|/|\||;", match.group(1))
+        deduped = []
+        seen = set()
+        for item in items:
+            cleaned = _normalize_resume_text(item).strip(" .-")
+            canonical = _canonical_keyword(cleaned)
+            if not canonical or canonical in seen:
+                continue
+            seen.add(canonical)
+            deduped.append(cleaned.title())
+        if deduped:
+            return deduped[:6]
+
+    normalized = _normalize_resume_text(text)
+    inline_match = re.search(
+        r"\blanguages?(?: known)?\b\s*[:\-]\s*([a-z ,/|]{4,160})",
+        normalized,
+        re.I,
+    )
+    if not inline_match:
+        return []
+
+    items = re.split(r",|/|\||;", inline_match.group(1))
+    deduped = []
+    seen = set()
+    for item in items:
+        cleaned = _normalize_resume_text(item).strip(" .-")
+        canonical = _canonical_keyword(cleaned)
+        if not canonical or canonical in seen:
+            continue
+        seen.add(canonical)
+        deduped.append(cleaned.title())
+    return deduped[:6]
+
+
+def _extract_candidate_name_from_resume(text: str, file_name: str = "") -> str:
+    heading_stopwords = {
+        "career objective",
+        "professional summary",
+        "summary",
+        "profile",
+        "educational qualification",
+        "educational qualifications",
+        "education",
+        "technical skills",
+        "skills",
+        "internships and projects",
+        "internships",
+        "projects",
+        "experience",
+        "work experience",
+        "personal details",
+        "achievements",
+        "declaration",
+        "curriculum vitae",
+        "cv",
+    }
+    institution_words = {"school", "college", "university", "institute", "engineering", "board"}
+
+    for line in _prepare_resume_lines(text):
+        if not line:
+            continue
+        normalized_line = _normalize_resume_text(line).lower()
+        if normalized_line in heading_stopwords:
+            continue
+        if any(word in normalized_line for word in institution_words):
+            continue
+        if re.fullmatch(r"[a-zA-Z]+(?: [a-zA-Z]+){1,3}", line):
+            words = line.split()
+            if all(len(word) >= 2 for word in words):
+                return " ".join(word.capitalize() for word in words)
+
+    file_stem = Path(file_name or "").stem
+    cleaned_stem = re.sub(r"\(\d+\)$", "", file_stem).replace("_", " ").replace("-", " ").strip()
+    cleaned_stem = re.sub(r"\bc\.?v\.?\b", "", cleaned_stem, flags=re.I).strip()
+    if re.fullmatch(r"[a-zA-Z]+(?: [a-zA-Z]+){1,3}", cleaned_stem):
+        return " ".join(word.capitalize() for word in cleaned_stem.split())
+    return ""
+
+
+def _get_resume_section_display_label(section_name: str) -> str:
+    return {
+        "objective": "Career Objective",
+        "education": "Education",
+        "experience": "Experience",
+        "projects_internships": "Projects & Internships",
+        "projects": "Projects",
+        "internships": "Internships",
+        "skills": "Technical Skills",
+        "achievements": "Key Achievements",
+        "languages": "Languages",
+        "hobbies": "Interests",
+        "personal": "Personal Details",
+        "declaration": "Declaration",
+    }.get(section_name, section_name.replace("_", " ").title())
+
+
+def _build_ordered_resume_sections(text: str) -> list[tuple[str, list[str]]]:
+    sections: list[tuple[str, list[str]]] = []
+    current_heading = None
+    current_lines: list[str] = []
+
+    for line in _prepare_resume_lines(text):
+        section_name, trailing = _classify_resume_section_line(line)
+        if section_name:
+            if current_heading is not None or current_lines:
+                sections.append((current_heading or "Profile", current_lines))
+            current_heading = _get_resume_section_display_label(section_name)
+            current_lines = []
+            if trailing:
+                current_lines.append(trailing)
+            continue
+
+        if current_heading is None:
+            current_heading = "Profile"
+        current_lines.append(line)
+
+    if current_heading is not None or current_lines:
+        sections.append((current_heading or "Profile", current_lines))
+
+    return sections
+
+
+def _build_simple_resume_text(
+    candidate_name: str,
+    job_role: str,
+    extracted: dict,
+    original_text: str = "",
+) -> str:
+    if original_text:
+        sections = _build_ordered_resume_sections(original_text)
+        header_lines = [candidate_name or "Candidate"]
+        if job_role:
+            header_lines.append(job_role)
+
+        rendered_sections = ["\n".join(header_lines)]
+        for heading, lines in sections:
+            if not lines:
+                rendered_sections.append(heading)
+            else:
+                rendered_sections.append(f"{heading}\n" + "\n".join(lines))
+        return "\n\n".join(rendered_sections).strip()
+
+    sections = []
+    header_lines = [candidate_name or "Candidate"]
+    if job_role:
+        header_lines.append(job_role)
+    sections.append("\n".join(header_lines))
+
+    summary_text = str(extracted.get("career_objective") or "").strip()
+    if summary_text:
+        sections.append("Summary\n" + summary_text)
+
+    if extracted.get("educational_qualifications"):
+        sections.append(
+            "Education\n- " + "\n- ".join(extracted.get("educational_qualifications") or [])
+        )
+
+    if extracted.get("technical_skills"):
+        sections.append(
+            "Technical Skills\n- " + "\n- ".join(extracted.get("technical_skills") or [])
+        )
+
+    def _projectish_key(value: str) -> str:
+        normalized = _canonical_keyword(value)
+        normalized = re.sub(r"^(?:(?:internship|trainee)\s+)+", "", normalized)
+        return normalized.strip()
+
+    project_like = []
+    if extracted.get("internships"):
+        project_like.extend(extracted.get("internships") or [])
+    if extracted.get("projects"):
+        for item in extracted.get("projects") or []:
+            if _projectish_key(item) not in {_projectish_key(existing) for existing in project_like}:
+                project_like.append(item)
+    deduped_project_like = []
+    seen_project_keys = set()
+    for item in project_like:
+        key = _projectish_key(item)
+        if not key or key in seen_project_keys:
+            continue
+        seen_project_keys.add(key)
+        deduped_project_like.append(item)
+    project_like = deduped_project_like
+    if project_like:
+        sections.append(
+            "Projects & Internships\n- " + "\n- ".join(project_like)
+        )
+
+    if extracted.get("experience"):
+        sections.append(
+            "Experience\n- " + "\n- ".join(extracted.get("experience") or [])
+        )
+
+    if extracted.get("achievements"):
+        sections.append(
+            "Key Achievements\n- " + "\n- ".join(extracted.get("achievements") or [])
+        )
+
+    if extracted.get("languages"):
+        sections.append(
+            "Languages\n- " + "\n- ".join(extracted.get("languages") or [])
+        )
+
+    if extracted.get("hobbies"):
+        sections.append(
+            "Interests\n- " + "\n- ".join(extracted.get("hobbies") or [])
+        )
+
+    return "\n\n".join(section for section in sections if section).strip()
+
+
+def _build_resume_interview_extract_payload(text: str, file_name: str = "", job_role: str = "") -> dict:
+    normalized = _normalize_resume_text(text)
+    analysis = _build_resume_analysis_payload(text, file_name)
+    project_section_lines = _get_resume_section_lines(
+        text,
+        ["projects_internships", "projects", "internships"],
+        limit=12,
+    )
+    internships = _extract_project_section_items(project_section_lines, limit=6, internships_only=True)
+    hobbies = _extract_resume_hobbies(text)
+    career_objective = _extract_resume_objective(text)
+    achievements = _extract_resume_achievements(text)
+    languages = _extract_resume_languages(text)
+    educational_qualifications = analysis.get("education") or []
+    experience = analysis.get("experience_highlights") or []
+    projects = analysis.get("project_highlights") or []
+    skills = analysis.get("skills") or []
+    candidate_name = _extract_candidate_name_from_resume(text, file_name) or analysis.get("candidate_name") or ""
+
+    extracted = {
+        "career_objective": career_objective,
+        "educational_qualifications": educational_qualifications[:6],
+        "technical_skills": skills[:12],
+        "projects": projects[:6],
+        "internships": internships,
+        "experience": experience[:6],
+        "achievements": achievements[:6],
+        "languages": languages[:6],
+        "hobbies": hobbies[:6],
+    }
+
+    strong_signal_found = bool(skills or projects or experience)
+    recommended_focus = []
+    for item in skills[:8] + projects[:4] + experience[:4]:
+        cleaned = _normalize_resume_text(item)
+        if cleaned and cleaned not in recommended_focus:
+            recommended_focus.append(cleaned)
+
+    return {
+        "resume_text": normalized,
+        "raw_resume_text": text[:12000],
+        "normalized_resume_text": _prepare_resume_text_for_display(text)[:12000],
+        "analysis": analysis,
+        "candidate_name": candidate_name,
+        "extracted": extracted,
+        "simple_resume_text": _build_simple_resume_text(candidate_name, job_role, extracted, text)[:12000],
+        "job_role": job_role,
+        "interview_ready": strong_signal_found,
+        "ready_reason": (
+            "The resume has enough usable interview signals to generate personalized questions."
+            if strong_signal_found
+            else "Add at least one clear skill, project, or experience item before starting a resume-based interview."
+        ),
+        "recommended_focus": recommended_focus[:10],
     }
 
 
@@ -2194,6 +3777,13 @@ async def analyze_resume(
             detail="We could not read text from this PDF. Try a text-based resume PDF instead of a scanned image.",
         )
 
+    looks_like_resume, resume_error = _looks_like_resume(structured_resume_text, file_name)
+    if not looks_like_resume:
+        raise HTTPException(
+            status_code=400,
+            detail=resume_error or "This document does not look like a resume or CV. Please upload a proper resume/CV file.",
+        )
+
     fallback_analysis = _build_resume_analysis_payload(structured_resume_text, file_name)
     fallback_job_requirements = _build_job_requirements_payload(job_description)
     fallback_scorecard = _build_resume_scorecard(normalized_resume_text, file_name)
@@ -2296,6 +3886,92 @@ async def analyze_resume(
         "recommendations": recommendations,
         "providers": provider_meta,
     }
+
+
+@app.post("/resume-analyzer/validate")
+async def validate_resume_upload(
+    file_name: str = Body(""),
+    resume_text: str = Body(""),
+    resume_data_url: str = Body(""),
+    authorization: str = Header(...),
+):
+    token = authorization.replace("Bearer ", "")
+    await get_current_user(token, allow_db_fallback=True)
+
+    structured_resume_text = resume_text or ""
+    if not _normalize_resume_text(structured_resume_text) and resume_data_url:
+        pdf_bytes = _decode_pdf_data_url(resume_data_url)
+        if not pdf_bytes:
+            raise HTTPException(status_code=400, detail="The uploaded resume could not be decoded.")
+        structured_resume_text = _extract_pdf_text_from_bytes(pdf_bytes)
+    structured_resume_text = _prepare_resume_text_for_analysis(structured_resume_text)
+
+    normalized_resume_text = _normalize_resume_text(structured_resume_text)
+    if not normalized_resume_text:
+        raise HTTPException(
+            status_code=400,
+            detail="We could not read text from this PDF. Please upload a text-based resume PDF, not a scanned image PDF.",
+        )
+
+    looks_like_resume, resume_error = _looks_like_resume(structured_resume_text, file_name)
+    if not looks_like_resume:
+        raise HTTPException(
+            status_code=400,
+            detail=resume_error or "This document does not look like a resume or CV. Please upload a proper resume/CV file.",
+        )
+
+    details = _resume_signal_details(structured_resume_text, file_name)
+    return {
+        "status": "RESUME_VALIDATED",
+        "valid": True,
+        "message": "Resume PDF accepted.",
+        "word_count": details["word_count"],
+        "contact_checks": {
+            "email": details["has_email"],
+            "phone": details["has_phone"],
+            "profile_link": details["has_profile_link"],
+        },
+        "resume_signal_score": details["score"],
+    }
+
+
+@app.post("/resume-interview/extract")
+async def extract_resume_interview_data(
+    file_name: str = Body(""),
+    resume_text: str = Body(""),
+    resume_data_url: str = Body(""),
+    job_role: str = Body(""),
+    authorization: str = Header(None),
+):
+    try:
+        if authorization:
+            token = authorization.replace("Bearer ", "")
+            await get_current_user(token, allow_db_fallback=True)
+
+        structured_resume_text = resume_text or ""
+        if not _normalize_resume_text(structured_resume_text) and resume_data_url:
+            pdf_bytes = _decode_pdf_data_url(resume_data_url)
+            if not pdf_bytes:
+                raise HTTPException(status_code=400, detail="The uploaded resume could not be decoded.")
+            structured_resume_text = _extract_pdf_text_from_bytes(pdf_bytes)
+        structured_resume_text = _prepare_resume_text_for_analysis(structured_resume_text)
+
+        normalized_resume_text = _normalize_resume_text(structured_resume_text)
+        if not normalized_resume_text:
+            raise HTTPException(
+                status_code=400,
+                detail="We could not read useful text from this PDF. Please try another resume PDF.",
+            )
+
+        payload = _build_resume_interview_extract_payload(structured_resume_text, file_name, job_role)
+        return {
+            "status": "RESUME_INTERVIEW_READY",
+            **payload,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Resume interview extraction failed: {exc}")
 
 # ================= INTERVIEW RESULTS =================
 @app.post("/interview-result")

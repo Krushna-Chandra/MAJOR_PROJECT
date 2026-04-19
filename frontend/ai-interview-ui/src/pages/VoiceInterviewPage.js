@@ -15,6 +15,13 @@ import {
 const API_BASE_URL = process.env.REACT_APP_API_URL || "http://127.0.0.1:8000";
 
 function buildPayload(context) {
+  let candidateName = "";
+  try {
+    const storedUser = JSON.parse(localStorage.getItem("user") || "{}");
+    candidateName = storedUser?.first_name || "";
+  } catch {
+    candidateName = "";
+  }
   const selectedOptions = Array.isArray(context.selectedOptions) ? context.selectedOptions.filter(Boolean) : [];
   const focusAreas = Array.isArray(context.focusAreas) ? context.focusAreas.filter(Boolean) : [];
   const effectiveOptions = focusAreas.length ? focusAreas : selectedOptions;
@@ -39,6 +46,8 @@ function buildPayload(context) {
     interview_mode_time: context.interviewModeTime || null,
     time_mode_interval: context.timeModeInterval || null,
     resume_text: context.resumeText || "",
+    resume_insights: context.resumeInsights || null,
+    candidate_name: context.candidateName || candidateName || "",
   };
 }
 

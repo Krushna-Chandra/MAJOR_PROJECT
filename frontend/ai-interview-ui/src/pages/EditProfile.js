@@ -17,10 +17,13 @@ function EditProfile() {
   const [profileImage, setProfileImage] = useState(
     storedUser?.profile_image || null
   );
+  const [originalUploadImage, setOriginalUploadImage] = useState(null);
 
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [loading, setLoading] = useState(false);
   const [cropModalImg, setCropModalImg] = useState(null);
+  const [notification, setNotification] = useState(null);
+  const [showSuccessPopup, setShowSuccessPopup] = useState(false);
 
   /* ---------- IMAGE UPLOAD ---------- */
   const handleImageUpload = (e) => {
@@ -29,6 +32,7 @@ function EditProfile() {
 
     const reader = new FileReader();
     reader.onloadend = () => {
+      setOriginalUploadImage(reader.result);
       setCropModalImg(reader.result);
     };
     reader.readAsDataURL(file);
@@ -38,7 +42,7 @@ function EditProfile() {
   const handleSave = async () => {
     // rule: last name alone not allowed
     if (firstName.trim() === "" && lastName.trim() !== "") {
-      alert("Fill out the first name first");
+      setNotification({ type: "error", message: "Fill out the first name first." });
       return;
     }
 
@@ -52,6 +56,7 @@ function EditProfile() {
     }
 
     setLoading(true);
+    setNotification(null);
     try {
       const payload = {};
 
@@ -93,10 +98,13 @@ function EditProfile() {
         })
       );
 
-      alert("Profile updated");
-      navigate("/");
+      setNotification({ type: "success", message: "Profile updated successfully." });
+      setShowSuccessPopup(true);
     } catch (err) {
-      alert(err.response?.data?.detail || "Profile update failed");
+      setNotification({
+        type: "error",
+        message: err.response?.data?.detail || "Profile update failed"
+      });
     } finally {
       setLoading(false);
     }
@@ -107,12 +115,19 @@ function EditProfile() {
       <div className="auth-card" style={{ textAlign: "center" }}>
         <h2>Edit Profile</h2>
 
+        {notification && (
+          <div className={`profile-notification profile-notification--${notification.type}`}>
+            {notification.message}
+          </div>
+        )}
+
         {/* CURRENT IMAGE */}
         <div style={{ marginBottom: "20px" }}>
           {profileImage ? (
             <>
               <button
                 type="button"
+                className="edit-image-hover-wrapper"
                 style={{
                   width: "120px",
                   height: "120px",
@@ -123,10 +138,11 @@ function EditProfile() {
                   border: "none",
                   background: "transparent",
                   overflow: "hidden",
-                  cursor: "pointer"
+                  cursor: "pointer",
+                  position: "relative"
                 }}
                 onClick={() => {
-                  setCropModalImg(profileImage);
+                  setCropModalImg(originalUploadImage || profileImage);
                   setConfirmRemove(false);
                 }}
                 title="Edit profile image"
@@ -142,6 +158,7 @@ function EditProfile() {
                     display: "block"
                   }}
                 />
+                <span className="edit-image-hover-text">Edit</span>
               </button>
 
               {!confirmRemove ? (
@@ -161,6 +178,7 @@ function EditProfile() {
                     <button
                       onClick={() => {
                         setProfileImage(null);
+                        setOriginalUploadImage(null);
                         setConfirmRemove(false);
                       }}
                       className="mock-btn"
@@ -220,6 +238,33 @@ function EditProfile() {
             setCropModalImg(null);
           }}
         />
+      )}
+
+      {showSuccessPopup && (
+        <div className="modal-overlay" onClick={() => setShowSuccessPopup(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="modal-close-btn"
+              onClick={() => setShowSuccessPopup(false)}
+              aria-label="Close"
+            >
+              ×
+            </button>
+            <div style={{ textAlign: "center", padding: "12px 0" }}>
+              <h3>Profile updated</h3>
+              <p>Your profile changes were saved successfully.</p>
+            </div>
+            <button
+              type="button"
+              className="mock-btn"
+              style={{ width: "100%", marginTop: 8 }}
+              onClick={() => navigate("/")}
+            >
+              Continue
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

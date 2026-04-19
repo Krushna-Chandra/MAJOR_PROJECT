@@ -4,36 +4,15 @@ import "../App.css";
 import MiniNavbar from "../components/MiniNavbar";
 import mockHero from "../assets/mock.png";
 import mistakeImg from "../assets/mistake.png";
+import {
+  MOCK_JOB_ROLES,
+  getResolvedJobRole,
+  getRoleSuggestions,
+} from "../utils/roleSearch";
 
 function MockInterview() {
   const navigate = useNavigate();
-  const rolesList = [
-    "Frontend Developer",
-    "Backend Developer",
-    "Full Stack Developer",
-    "Data Engineer",
-    "Machine Learning Engineer",
-    "AI Engineer",
-    "QA Engineer",
-    "Automation Engineer",
-    "DevOps Engineer",
-    "Site Reliability Engineer",
-    "Product Manager",
-    "Project Manager",
-    "Business Analyst",
-    "UI/UX Designer",
-    "Graphic Designer",
-    "Mobile Developer",
-    "iOS Developer",
-    "Android Developer",
-    "Security Engineer",
-    "Cloud Architect",
-    "System Architect",
-    "Technical Writer",
-    "Scrum Master",
-    "Database Administrator",
-    "Network Engineer"
-  ];
+  const rolesList = MOCK_JOB_ROLES;
 
   const [showSetup, setShowSetup] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -54,6 +33,18 @@ function MockInterview() {
       setupRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   }, [showSetup]);
+
+  const suggestedRoles = searchTerm.trim()
+    ? getRoleSuggestions(searchTerm, rolesList)
+    : [];
+
+  const resolveSearchSelection = () => {
+    if (!searchTerm.trim()) return;
+    const resolvedRole = getResolvedJobRole(searchTerm, rolesList);
+    if (!resolvedRole) return;
+    setSelectedOptions([resolvedRole]);
+    setSearchTerm("");
+  };
 
   const clearSelection = () => {
     setSelectedOptions([]);
@@ -185,6 +176,13 @@ function MockInterview() {
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   placeholder="Search job roles..."
+                  onBlur={() => window.setTimeout(resolveSearchSelection, 100)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      resolveSearchSelection();
+                    }
+                  }}
                   disabled={isLocked}
                   style={{
                     flex: 1,
@@ -229,10 +227,8 @@ function MockInterview() {
                   overflowY: 'auto',
                   boxShadow: '0 10px 30px rgba(0,0,0,0.12)'
                 }}>
-                  {rolesList.filter((opt) => opt.toLowerCase().startsWith(searchTerm.trim().toLowerCase())).length > 0 ? (
-                    rolesList
-                      .filter((opt) => opt.toLowerCase().startsWith(searchTerm.trim().toLowerCase()))
-                      .map((opt) => (
+                  {suggestedRoles.length > 0 ? (
+                    suggestedRoles.map((opt) => (
                         <div
                           key={opt}
                           onClick={() => {
@@ -250,7 +246,7 @@ function MockInterview() {
                       ))
                   ) : (
                     <div style={{ padding: '8px 10px', color: '#718096' }}>
-                      No options starting with "{searchTerm}"
+                      No matching technical roles for "{searchTerm}"
                     </div>
                   )}
                 </div>

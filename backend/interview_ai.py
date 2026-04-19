@@ -309,6 +309,18 @@ def _normalize_text(value: str) -> str:
     return re.sub(r"\s+", " ", (value or "").strip())
 
 
+def _candidate_first_name(payload: Dict[str, Any]) -> str:
+    raw = _normalize_text(payload.get("candidate_name") or "")
+    if not raw:
+        return ""
+    first = raw.split(" ")[0].strip(" ,.;:-")
+    if not first:
+        return ""
+    if len(first) > 24:
+        return ""
+    return first
+
+
 def _clamp_question_count(value: Any) -> int:
     try:
         count = int(value)
@@ -390,6 +402,23 @@ def _context_summary(payload: Dict[str, Any]) -> str:
     resume_text = _normalize_text(payload.get("resume_text") or "")
     if resume_text:
         parts.append(f"Resume snippet: {resume_text[:700]}")
+    resume_insights = payload.get("resume_insights") if isinstance(payload.get("resume_insights"), dict) else {}
+    extracted = resume_insights.get("extracted") if isinstance(resume_insights.get("extracted"), dict) else {}
+    education = _safe_list(extracted.get("educational_qualifications") or [])
+    resume_projects = _safe_list(extracted.get("projects") or [])
+    resume_skills = _safe_list(extracted.get("technical_skills") or [])
+    resume_experience = _safe_list(extracted.get("experience") or [])
+    resume_hobbies = _safe_list(extracted.get("hobbies") or [])
+    if education:
+        parts.append(f"Resume education: {', '.join(education[:4])}")
+    if resume_skills:
+        parts.append(f"Resume extracted skills: {', '.join(resume_skills[:8])}")
+    if resume_projects:
+        parts.append(f"Resume extracted projects: {', '.join(resume_projects[:4])}")
+    if resume_experience:
+        parts.append(f"Resume extracted experience: {', '.join(resume_experience[:4])}")
+    if resume_hobbies:
+        parts.append(f"Resume hobbies/interests: {', '.join(resume_hobbies[:4])}")
     return "\n".join(parts)
 
 
@@ -2343,7 +2372,7 @@ def _next_hr_focus(state: Dict[str, Any], last_question: Optional[Dict[str, Any]
 
 def _adaptive_role_interview_enabled(payload: Dict[str, Any]) -> bool:
     category = _normalize_text(payload.get("category") or "").lower()
-    if category not in {"technical", "mock"}:
+    if category not in {"technical", "mock", "resume"}:
         return False
     selected_mode = payload.get("selected_mode") or (
         "language" if payload.get("primary_language") else "role" if payload.get("job_role") else "general"
@@ -2791,6 +2820,10 @@ def _build_control_turn_response(
         "is_control_turn": True,
         "control_command": command,
         "should_end_interview": bool(should_end_interview),
+        # Include adaptive state for skill-based interviews
+        "current_skill": question.get("skill", ""),
+        "difficulty_adjusted_to": question.get("difficulty", "medium"),
+        "difficulty_progression": session.get("meta", {}).get("adaptive_state", {}).get("state", {}).get("difficulty_history", []),
     }
 
 
@@ -3125,8 +3158,8 @@ def _build_adaptive_state(payload: Dict[str, Any], role_blueprint: Dict[str, Any
     category = _normalize_text(payload.get("category") or "").lower()
     selected_mode = _normalize_text(payload.get("selected_mode") or "").lower()
     primary_language = _normalize_text(payload.get("primary_language") or role_blueprint.get("language_focus") or "")
-    include_hr = category == "mock"
-    hr_target = 0 if not include_hr else (1 if question_count <= 5 else 2)
+    include_hr = category in {"mock", "resume"}
+    hr_target = 0 if not include_hr else (1 if question_count <= 5 else 2 if category == "mock" else max(2, min(3, question_count // 3 or 2)))
     technical_target = max(1, question_count - hr_target)
     language_mode = (selected_mode or ("language" if primary_language else "role")) == "language" and bool(primary_language)
     return {
@@ -3166,6 +3199,8 @@ def _adaptive_intro(payload: Dict[str, Any], question_count: int) -> str:
     role = _normalize_text(payload.get("job_role") or "the selected role")
     language = _normalize_text(payload.get("primary_language") or "the selected language")
     category = _normalize_text(payload.get("category") or "").lower()
+    first_name = _candidate_first_name(payload)
+    greeting = f"Hi {first_name}, nice to meet you. " if first_name else "Hi, nice to meet you. "
     subject = language if selected_mode == "language" and language else role
     time_mode_minutes = _payload_time_mode_minutes(payload)
     time_mode_suffix = (
@@ -3181,28 +3216,34 @@ def _adaptive_intro(payload: Dict[str, Any], question_count: int) -> str:
     if selected_mode == "language" and language:
         if category == "mock":
             return (
-                f"Hi, nice to meet you. I will be taking your {language} mock interview today. "
+                f"{greeting}I will be taking your {language} mock interview today. "
                 "Let us keep this conversational, and feel free to think out loud. "
                 f"We will begin with {language} fundamentals, go one level deeper conceptually, "
                 "and then I will use one practical language question to tailor the rest of the round. "
                 "Because this is a mock round, I may include a short behavioral section near the end as well."
             )
         return (
-            f"Hi, nice to meet you. I will be taking your {language} technical interview today. "
+            f"{greeting}I will be taking your {language} technical interview today. "
             "Let us keep this conversational, and feel free to think out loud. "
             f"We will begin with {language} fundamentals, go one level deeper conceptually, "
             "and then I will use one practical language question to tailor the later questions. "
             f"{time_mode_suffix}"
         )
+    if category == "resume":
+        return (
+            f"{greeting}I will be taking your resume-based interview for {subject} today. "
+            "I have reviewed the profile signals extracted from your resume, and I will use your background to keep the conversation personalized, practical, and natural. "
+            "We will cover technical depth first, and I will also include a small HR or behavioral section based on your profile."
+        )
     if category == "mock":
         return (
-            f"Hi, nice to meet you. I will be taking your {subject} mock interview today. "
+            f"{greeting}I will be taking your {subject} mock interview today. "
             "Let us keep this conversational, and feel free to think out loud. "
             "I will first understand where you are strongest, then I will adapt the interview one question at a time. "
             "Because this is a mock round, I may include a short behavioral section near the end as well."
         )
     return (
-        f"Hi, nice to meet you. I will be taking your {subject} technical interview today. "
+        f"{greeting}I will be taking your {subject} technical interview today. "
         "Let us keep this conversational, and feel free to think out loud. "
         "I will first confirm the technical area you want to focus on, then I will adapt the next questions based on your answers. "
         f"{technical_suffix}"
@@ -4230,6 +4271,8 @@ async def _create_adaptive_interview_session(
 
 def _hr_intro_message(payload: Dict[str, Any], question_count: int) -> str:
     role = _normalize_text(payload.get("job_role") or "candidate")
+    first_name = _candidate_first_name(payload)
+    greeting = f"Hi {first_name}! Nice to meet you. " if first_name else "Hi! Nice to meet you. "
     round_mode = _hr_round_label(_hr_round_mode(payload))
     focus = ", ".join(_selected_focus_areas(payload)[:3]) or "communication, leadership, and problem-solving"
     time_mode_minutes = _payload_time_mode_minutes(payload)
@@ -4239,7 +4282,7 @@ def _hr_intro_message(payload: Dict[str, Any], question_count: int) -> str:
         else f"We will cover about {question_count} tailored questions with extra attention on {focus}."
     )
     return (
-        f"Hi! Nice to meet you. I will be taking your {round_mode} interview for a {role} candidate today. "
+        f"{greeting}I will be taking your {round_mode} interview for a {role} candidate today. "
         f"{pacing}"
     )
 
@@ -5065,7 +5108,483 @@ Rules:
     )
 
 
+def _extract_skills_from_resume(resume_insights: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Extract and structure skills from resume insights with importance weighting."""
+    if not isinstance(resume_insights, dict):
+        return []
+    
+    extracted = resume_insights.get("extracted", {})
+    if not isinstance(extracted, dict):
+        return []
+    
+    technical_skills = _safe_list(extracted.get("technical_skills", []))
+    
+    # Create skill objects with importance (lower number = higher importance)
+    skills = []
+    for idx, skill_name in enumerate(technical_skills):
+        skill_name = _normalize_text(skill_name).strip()
+        if not skill_name:
+            continue
+        
+        # Assign importance: first few skills are more important
+        if idx < 3:
+            importance = 1  # Top importance
+        elif idx < 6:
+            importance = 2  # Medium importance
+        else:
+            importance = 3  # Lower importance
+        
+        skills.append({
+            "name": skill_name,
+            "importance": importance,
+            "question_count": 3 if importance == 1 else (2 if importance == 2 else 1),
+        })
+    
+    return skills
+
+
+async def _evaluate_skill_based_adaptive_answer(
+    session: Dict[str, Any],
+    question_index: int,
+    question: Dict[str, Any],
+    answer_text: str
+) -> Dict[str, Any]:
+    """Evaluate answer and handle difficulty adjustment for skill-based adaptive interviews."""
+    # Standard evaluation
+    context_summary = _context_summary(session["context"])
+    expected_points = question.get("expected_points", [])
+    evaluation_focus = question.get("evaluation_focus", [])
+    
+    prompt = f"""
+You are evaluating a technical interview answer about {question.get("skill", "a technical skill")}.
+
+Expected to cover: {', '.join(expected_points)}
+Evaluation focus: {', '.join(evaluation_focus)}
+
+Answer: {answer_text}
+
+Provide a score from 0-100 and feedback.
+
+Return JSON:
+{{
+  "score": <0-100>,
+  "feedback": "brief feedback",
+  "strengths": ["strength1"],
+  "gaps": ["gap1"],
+  "matched_points": ["point1"],
+  "missed_points": ["point1"],
+  "suggested_answer": "brief suggestion",
+  "assistant_reply": "brief reply",
+  "relevance": <0-100>,
+  "correctness": <0-100>,
+  "clarity": <0-100>,
+  "technical_depth": <0-100>
+}}
+"""
+    
+    try:
+        if GEMINI_API_KEY:
+            evaluation = await _call_gemini_json(prompt, timeout=LIVE_AI_TIMEOUT_SECONDS)
+        else:
+            evaluation = await _call_ollama_json(prompt, model=OLLAMA_MODEL, timeout=OLLAMA_TIMEOUT_SECONDS)
+        provider_used = "gemini" if GEMINI_API_KEY else "ollama"
+    except Exception:
+        evaluation = _heuristic_evaluation(question, answer_text)
+        provider_used = "fallback"
+    
+    score = int(evaluation.get("score", 50))
+    
+    # Update adaptive state
+    adaptive_meta = session.get("meta", {}).get("adaptive_state", {})
+    adaptive_state = adaptive_meta.get("state", {})
+    
+    if adaptive_state:
+        # Track the score
+        adaptive_state["scores"].append(score)
+        adaptive_state["answers"].append(answer_text)
+        
+        # Adjust difficulty based on score
+        current_difficulty = adaptive_state.get("current_difficulty", "medium")
+        new_difficulty = _adjust_difficulty(current_difficulty, score)
+        adaptive_state["current_difficulty"] = new_difficulty
+        adaptive_state["difficulty_history"].append(new_difficulty)
+        
+        # Move to next question index
+        adaptive_state["current_question_index"] = question_index + 1
+    
+    # Build result
+    result = {
+        "question_id": question["id"],
+        "question": question["question"],
+        "question_type": "technical",
+        "answer": answer_text,
+        "score": max(0, min(100, score)),
+        "feedback": evaluation.get("feedback", ""),
+        "strengths": evaluation.get("strengths", [])[:3],
+        "gaps": evaluation.get("gaps", [])[:3],
+        "matched_points": evaluation.get("matched_points", [])[:4],
+        "missed_points": evaluation.get("missed_points", [])[:4],
+        "suggested_answer": evaluation.get("suggested_answer", ""),
+        "assistant_reply": evaluation.get("assistant_reply", ""),
+        "relevance": evaluation.get("relevance", 50),
+        "correctness": evaluation.get("correctness", 50),
+        "clarity": evaluation.get("clarity", 50),
+        "technical_depth": evaluation.get("technical_depth", 50),
+        "provider": provider_used,
+        "difficulty_adjusted_to": adaptive_state.get("current_difficulty", "medium") if adaptive_state else "medium",
+    }
+    
+    # Store answer and evaluation
+    answers = session.get("answers", [])
+    evaluations = session.get("evaluations", [])
+    
+    if len(answers) > question_index:
+        answers[question_index] = answer_text
+    else:
+        answers.append(answer_text)
+    
+    if len(evaluations) > question_index:
+        evaluations[question_index] = result
+    else:
+        evaluations.append(result)
+    
+    # Check if interview is complete
+    is_complete = question_index >= adaptive_state.get("total_questions", 10) - 1 if adaptive_state else False
+    
+    # Generate next question if not complete
+    next_question = None
+    next_question_type = None
+    next_question_time = None
+    
+    if not is_complete:
+        next_q_data = await _generate_skill_based_question(session, adaptive_state)
+        next_question_time = next_q_data.get("time_limit_seconds", 60)
+        
+        # Add next question to session
+        next_question_obj = {
+            "id": str(uuid.uuid4()),
+            "question": next_q_data.get("question", ""),
+            "question_type": "technical",
+            "difficulty": next_q_data.get("difficulty", "medium"),
+            "skill": next_q_data.get("skill", ""),
+            "expected_points": [next_q_data.get("skill", "")],
+            "evaluation_focus": ["technical accuracy", "clarity", "depth"],
+            "expected_keywords": next_q_data.get("expected_keywords", []),
+            "time_limit_seconds": next_question_time,
+        }
+        session["questions"].append(next_question_obj)
+        next_question = next_question_obj["question"]
+        next_question_type = "technical"
+    
+    await _persist_session(session)
+    
+    return {
+        **result,
+        "question_index": question_index,
+        "is_complete": is_complete,
+        "next_question": next_question,
+        "next_question_type": next_question_type,
+        "next_question_time_seconds": next_question_time,
+        "current_skill": adaptive_state.get("skills", [{}])[adaptive_state.get("current_skill_index", 0)].get("name", "") if adaptive_state else "",
+        "providers": dict(session.get("providers", {})),
+        "progress": {
+            "current": question_index + 1,
+            "total": adaptive_state.get("total_questions", 10) if adaptive_state else 10,
+        },
+        "difficulty_progression": adaptive_state.get("difficulty_history", []) if adaptive_state else [],
+    }
+
+
+
+def _calculate_dynamic_question_count(resume_insights: Dict[str, Any], experience_years: int = 0) -> int:
+    """Calculate total question count based on skills, projects, and experience."""
+    if not isinstance(resume_insights, dict):
+        return 10
+    
+    extracted = resume_insights.get("extracted", {})
+    if not isinstance(extracted, dict):
+        return 10
+    
+    skills = _extract_skills_from_resume(resume_insights)
+    
+    # Base: sum of all skill question counts
+    base_count = sum(s.get("question_count", 1) for s in skills)
+    if base_count == 0:
+        base_count = 10
+    
+    # Add bonus for projects
+    projects = _safe_list(extracted.get("projects", []))
+    project_bonus = 2 if len(projects) > 0 else 0
+    
+    # Add bonus for experience
+    experience_bonus = 1 if experience_years > 0 else 0
+    
+    total = base_count + project_bonus + experience_bonus
+    
+    # Clamp between 6 and 20
+    return max(6, min(20, total))
+
+
+def _build_skill_rotation_queue(skills: List[Dict[str, Any]]) -> List[str]:
+    """Build a random rotation queue of skills based on question count."""
+    import random as random_module
+    
+    queue = []
+    for skill in skills:
+        skill_name = skill.get("name", "")
+        count = skill.get("question_count", 1)
+        queue.extend([skill_name] * count)
+    
+    # Shuffle randomly instead of cycling
+    random_module.shuffle(queue)
+    return queue
+
+
+def _get_baseline_difficulty(experience: str) -> str:
+    """Determine starting difficulty based on experience level."""
+    value = (experience or "").strip().lower()
+    if "fresh" in value or "entry" in value or "0 year" in value:
+        return "easy"
+    if "mid" in value or "1-2 year" in value or "2-3 year" in value:
+        return "medium"
+    return "medium"  # Default to medium
+
+
+def _adjust_difficulty(current_difficulty: str, score: float) -> str:
+    """Adjust difficulty based on answer score."""
+    difficulty_levels = ["easy", "medium", "hard"]
+    current_idx = difficulty_levels.index(current_difficulty) if current_difficulty in difficulty_levels else 1
+    
+    if score >= 80:  # Correct answer
+        # Increase difficulty
+        new_idx = min(current_idx + 1, 2)
+    elif score < 50:  # Incorrect answer
+        # Decrease difficulty
+        new_idx = max(current_idx - 1, 0)
+    else:  # Partial/medium answer (50-79)
+        # Keep same difficulty
+        new_idx = current_idx
+    
+    return difficulty_levels[new_idx]
+
+
+def _get_time_limit_for_difficulty(difficulty: str) -> int:
+    """Get time limit in seconds based on difficulty."""
+    time_map = {
+        "easy": 45,
+        "medium": 60,
+        "hard": 90,
+    }
+    return time_map.get(difficulty, 60)
+
+
+def _build_adaptive_session_state(resume_insights: Dict[str, Any], experience: str) -> Dict[str, Any]:
+    """Build initial adaptive session state."""
+    skills = _extract_skills_from_resume(resume_insights)
+    total_questions = _calculate_dynamic_question_count(resume_insights, 0)
+    skill_queue = _build_skill_rotation_queue(skills)
+    baseline_difficulty = _get_baseline_difficulty(experience)
+    
+    return {
+        "adaptive_enabled": True,
+        "skills": skills,
+        "skill_queue": skill_queue,
+        "total_questions": total_questions,
+        "current_question_index": 0,
+        "current_difficulty": baseline_difficulty,
+        "baseline_difficulty": baseline_difficulty,
+        "difficulty_history": [baseline_difficulty],
+        "answers": [],
+        "scores": [],
+    }
+
+
+async def _generate_skill_based_question(
+    session: Dict[str, Any], 
+    adaptive_state: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Generate next question based on current skill and difficulty."""
+    current_idx = adaptive_state.get("current_question_index", 0)
+    skill_queue = adaptive_state.get("skill_queue", [])
+    current_difficulty = adaptive_state.get("current_difficulty", "medium")
+    job_role = session.get("payload", {}).get("job_role", "")
+    
+    # Get next skill from queue
+    current_skill = skill_queue[current_idx] if current_idx < len(skill_queue) else "General Concept"
+    
+    prompt = f"""
+You are generating a technical interview question for skill-based assessment.
+
+Context:
+- Skill to ask about: {current_skill}
+- Difficulty level: {current_difficulty}
+- Job role: {job_role}
+- Question number: {current_idx + 1} out of {len(skill_queue)}
+
+Generate a single {current_difficulty} level question about {current_skill} relevant to the {job_role} role.
+
+The question should be:
+- {current_difficulty.upper()} difficulty
+- Focused on {current_skill}
+- Answerable in 45-120 seconds
+- Practical and role-relevant
+
+Return valid JSON:
+{{
+  "question": "the interview question text",
+  "difficulty": "{current_difficulty}",
+  "skill": "{current_skill}",
+  "type": "technical",
+  "expected_keywords": ["keyword1", "keyword2", "keyword3"],
+  "time_limit_seconds": {_get_time_limit_for_difficulty(current_difficulty)},
+  "assistant_reply": "Let's discuss {current_skill}."
+}}
+"""
+    
+    try:
+        if GEMINI_API_KEY:
+            result = await _call_gemini_json(prompt, timeout=LIVE_AI_TIMEOUT_SECONDS)
+        else:
+            result = await _call_ollama_json(prompt, model=OLLAMA_MODEL, timeout=OLLAMA_TIMEOUT_SECONDS)
+        
+        return result if isinstance(result, dict) else {
+            "question": f"Tell me about {current_skill}.",
+            "difficulty": current_difficulty,
+            "skill": current_skill,
+            "type": "technical",
+            "expected_keywords": [current_skill],
+            "time_limit_seconds": _get_time_limit_for_difficulty(current_difficulty),
+            "assistant_reply": f"Let's discuss {current_skill}.",
+        }
+    except Exception as e:
+        return {
+            "question": f"Explain your experience with {current_skill} and how you've used it in projects.",
+            "difficulty": current_difficulty,
+            "skill": current_skill,
+            "type": "technical",
+            "expected_keywords": [current_skill],
+            "time_limit_seconds": _get_time_limit_for_difficulty(current_difficulty),
+            "assistant_reply": f"Let's explore {current_skill}.",
+        }
+
+
 async def create_interview_session(payload: Dict[str, Any]) -> Dict[str, Any]:
+    # Check for resume-based adaptive interview with skill extraction
+    category = _normalize_text(payload.get("category") or "").lower()
+    resume_insights = payload.get("resume_insights")
+    if category == "resume" and isinstance(resume_insights, dict) and resume_insights.get("extracted"):
+        # Use skill-based adaptive system for resume interviews
+        adaptive_state = _build_adaptive_session_state(resume_insights, payload.get("experience") or "")
+        
+        # Override question_count with dynamic count based on skills
+        dynamic_question_count = adaptive_state["total_questions"]
+        payload = {**payload, "question_count": dynamic_question_count}
+        
+        # Create session ID and initial session
+        session_id = str(uuid.uuid4())
+        temp_session = {
+            "session_id": session_id,
+            "payload": payload,
+            "context": {
+                "job_role": payload.get("job_role", ""),
+                "experience": payload.get("experience", ""),
+            },
+        }
+        
+        # Create proper session structure
+        session = {
+            "session_id": session_id,
+            "payload": payload,
+            "context": temp_session["context"],
+            "meta": {
+                "adaptive_state": {
+                    "enabled": True,
+                    "mode": "skill_based",
+                    "state": adaptive_state,
+                }
+            },
+            "questions": [],
+            "answers": [],
+            "evaluations": [],
+            "providers": {
+                "generation_provider": "gemini" if GEMINI_API_KEY else "ollama",
+                "evaluation_provider": "fallback",
+                "analysis_provider": "gemini" if GEMINI_API_KEY else "ollama",
+            },
+            "started_at": time.time(),
+        }
+        
+        # Add INTRODUCTION question first (before technical questions)
+        job_role = payload.get("job_role", "this role")
+        candidate_name = payload.get("candidate_name", "")
+        intro_question = {
+            "id": str(uuid.uuid4()),
+            "question": f"Please introduce yourself and tell me about your background, experience, and why you're interested in the {job_role} role.",
+            "question_type": "introduction",
+            "difficulty": "easy",
+            "skill": "Self-Introduction",
+            "expected_points": ["background", "experience", "motivation"],
+            "evaluation_focus": ["communication", "clarity", "relevance"],
+            "expected_keywords": ["experience", "background", "interested", "role"],
+            "time_limit_seconds": 90,
+        }
+        session["questions"].append(intro_question)
+        
+        # Generate first technical question based on skill and difficulty
+        first_question_data = await _generate_skill_based_question(temp_session, adaptive_state)
+        
+        # Add first technical question (after introduction)
+        first_question = {
+            "id": str(uuid.uuid4()),
+            "question": first_question_data.get("question", ""),
+            "question_type": "technical",
+            "difficulty": first_question_data.get("difficulty", "medium"),
+            "skill": first_question_data.get("skill", ""),
+            "expected_points": [first_question_data.get("skill", "")],
+            "evaluation_focus": ["technical accuracy", "clarity", "depth"],
+            "expected_keywords": first_question_data.get("expected_keywords", []),
+            "time_limit_seconds": first_question_data.get("time_limit_seconds", 60),
+        }
+        session["questions"].append(first_question)
+        
+        # Store session
+        INTERVIEW_SESSIONS[session_id] = session
+        await _persist_session(session)
+        
+        # Build opening greeting with candidate name
+        first_name = _candidate_first_name(payload)
+        greeting = f"Hi {first_name}, nice to meet you. " if first_name else "Hi, nice to meet you. "
+        opening_greeting = (
+            f"{greeting}I will be taking your resume-based skill adaptive interview for {job_role} today. "
+            f"I have reviewed the profile signals extracted from your resume, and I will use your background to keep the conversation personalized, practical, and natural. "
+            f"We will cover {dynamic_question_count} questions with adaptive difficulty based on your answers. "
+            f"Let us keep this conversational, and feel free to think out loud. "
+            f"Let's start with a quick introduction!"
+        )
+        
+        return {
+            "session_id": session_id,
+            "status": "ready",
+            "message": f"Resume-based skill adaptive interview ready. Total questions: {dynamic_question_count}",
+            "adaptive_enabled": True,
+            "skill_count": len(adaptive_state["skills"]),
+            "skills": [s.get("name") for s in adaptive_state["skills"]],
+            "total_questions": dynamic_question_count,
+            "starting_difficulty": "easy",
+            "assistant_intro": opening_greeting,
+            "current_question": intro_question["question"],
+            "current_skill": intro_question["skill"],
+            "current_question_type": "introduction",
+            "time_limit_seconds": intro_question["time_limit_seconds"],
+            "provider_used": session["providers"]["generation_provider"],
+            "time_limit_map": {
+                "easy": 45,
+                "medium": 60,
+                "hard": 90
+            }
+        }
+    
+    # Standard logic for non-resume or resume without extraction
     question_count = _resolve_question_count(payload)
     payload = {**payload, "question_count": question_count}
     interview_variation = _build_interview_variation(payload)
@@ -5332,7 +5851,15 @@ async def evaluate_interview_answer(
         return _build_off_topic_control_response(session, question_index, question, answer_text, off_topic_kind)
     adaptive_state = session.get("meta", {}).get("adaptive_state", {}) or {}
     if adaptive_state.get("enabled"):
-        if _normalize_text(adaptive_state.get("mode") or "").lower() == "hr":
+        mode = _normalize_text(adaptive_state.get("mode") or "").lower()
+        if mode == "skill_based":
+            result = await _evaluate_skill_based_adaptive_answer(
+                session,
+                question_index,
+                question,
+                answer_text,
+            )
+        elif mode == "hr":
             result = await _evaluate_hr_adaptive_interview_answer(
                 session,
                 question_index,
@@ -5522,6 +6049,115 @@ def _build_hr_score_breakdown(session: Dict[str, Any]) -> Optional[Dict[str, int
     return {key: value for key, value in breakdown.items() if value is not None} or None
 
 
+def _determine_proficiency_level(score: int) -> str:
+    """Determine proficiency level based on score: Beginner (0-50), Intermediate (51-85), Expert (86-100)"""
+    if score <= 50:
+        return "Beginner"
+    elif score <= 85:
+        return "Intermediate"
+    else:
+        return "Expert"
+
+
+def _build_skill_wise_breakdown(session: Dict[str, Any]) -> Dict[str, Any]:
+    """Build skill-wise performance breakdown for adaptive resume interviews."""
+    evaluations = _scored_evaluations(session)
+    adaptive_state = session.get("meta", {}).get("adaptive_state") or {}
+    
+    # Group evaluations by skill
+    skills_data = {}
+    for evaluation in evaluations:
+        skill = evaluation.get("skill", "General")
+        if skill not in skills_data:
+            skills_data[skill] = []
+        skills_data[skill].append(evaluation)
+    
+    # Build skill breakdown
+    skills_breakdown = {}
+    for skill, skill_evaluations in skills_data.items():
+        if not skill_evaluations:
+            continue
+            
+        # Calculate score
+        skill_score = int(round(sum(e["score"] for e in skill_evaluations) / len(skill_evaluations)))
+        
+        # Get difficulty progression
+        difficulty_progression = []
+        for i, eval_item in enumerate(skill_evaluations):
+            # Try to get difficulty from adaptive state history or estimate from order
+            difficulty = "Medium"  # Default
+            if adaptive_state and i < len(adaptive_state.get("difficulty_progression", [])):
+                difficulty = adaptive_state["difficulty_progression"][i]
+            difficulty_progression.append(difficulty)
+        
+        # Extract strengths and weaknesses from feedback
+        strengths = []
+        weaknesses = []
+        for eval_item in skill_evaluations:
+            if eval_item.get("strengths"):
+                strengths.extend(_safe_list(eval_item.get("strengths")))
+            if eval_item.get("gaps"):
+                weaknesses.extend(_safe_list(eval_item.get("gaps")))
+        
+        # Remove duplicates while preserving order
+        strengths = list(dict.fromkeys(strengths))[:3]
+        weaknesses = list(dict.fromkeys(weaknesses))[:3]
+        
+        # Determine performance rating
+        if skill_score >= 75:
+            performance = "Strong"
+        elif skill_score >= 60:
+            performance = "Moderate"
+        else:
+            performance = "Needs Work"
+        
+        proficiency = _determine_proficiency_level(skill_score)
+        
+        skills_breakdown[skill] = {
+            "score": skill_score,
+            "proficiency": proficiency,
+            "difficulty_progression": difficulty_progression,
+            "questions_count": len(skill_evaluations),
+            "performance": performance,
+            "strengths": strengths if strengths else [f"Basic understanding of {skill}"],
+            "weaknesses": weaknesses if weaknesses else [f"Further practice with {skill} needed"],
+            "recommendation": _generate_skill_recommendation(skill, skill_score, proficiency),
+        }
+    
+    # Identify top and weakest skills
+    sorted_skills = sorted(skills_breakdown.items(), key=lambda x: x[1]["score"], reverse=True)
+    top_skills = [skill for skill, _ in sorted_skills[:3]]
+    weakest_skills = [skill for skill, _ in sorted_skills[-3:][::-1]]
+    
+    # Calculate adaptive insights
+    avg_score = int(round(sum(e["score"] for e in evaluations) / len(evaluations))) if evaluations else 0
+    avg_difficulty = "Medium"
+    if adaptive_state and adaptive_state.get("difficulty_progression"):
+        difficulty_counts = {}
+        for diff in adaptive_state["difficulty_progression"]:
+            difficulty_counts[diff] = difficulty_counts.get(diff, 0) + 1
+        avg_difficulty = max(difficulty_counts, key=difficulty_counts.get)
+    
+    return {
+        "skills_breakdown": skills_breakdown,
+        "top_skills": top_skills,
+        "weakest_skills": weakest_skills,
+        "overall_score": avg_score,
+        "avg_difficulty_reached": avg_difficulty,
+        "total_evaluations": len(evaluations),
+    }
+
+
+def _generate_skill_recommendation(skill: str, score: int, proficiency: str) -> str:
+    """Generate skill-specific learning recommendation."""
+    recommendations = {
+        "Beginner": f"Start with fundamentals of {skill}. Build a strong foundation through tutorials and simple projects.",
+        "Intermediate": f"Deepen your {skill} expertise. Work on advanced patterns, optimization, and real-world applications.",
+        "Expert": f"You have strong {skill} skills. Focus on emerging trends and advanced architectural patterns.",
+    }
+    return recommendations.get(proficiency, f"Continue improving your {skill} skills.")
+
+
 def _fallback_summary(session: Dict[str, Any]) -> Dict[str, Any]:
     evaluations = _scored_evaluations(session)
     if evaluations:
@@ -5618,10 +6254,81 @@ async def complete_interview_session(session_id: str, ended_early: bool = False)
     evaluations = _scored_evaluations(session)
     context_summary = _context_summary(session.get("context", {}))
     adaptive_state = session.get("meta", {}).get("adaptive_state") or {}
-    adaptive_summary = ""
-    if adaptive_state.get("enabled"):
-        adaptive_summary = f"\nDiscovered candidate profile:\n{_adaptive_state_summary(adaptive_state)}\n"
-    prompt = f"""
+    
+    # Check if this is a resume interview with adaptive mode enabled
+    is_resume_adaptive = (
+        _normalize_text(session.get("context", {}).get("category") or "").lower() == "resume"
+        and adaptive_state.get("enabled")
+    )
+    
+    if is_resume_adaptive:
+        # Use skill-wise report for adaptive resume interviews
+        skill_wise_data = _build_skill_wise_breakdown(session)
+        job_role = session.get('context', {}).get('job_role', 'Target Role')
+        
+        # Generate AI summary for skill-wise report
+        prompt = f"""
+You are summarizing a skill-based adaptive interview where the candidate was tested on multiple technical skills with progressive difficulty.
+
+Interview context: {job_role}
+Skills tested: {', '.join(skill_wise_data['skills_breakdown'].keys())}
+Overall performance: {skill_wise_data['overall_score']}/100
+Average difficulty reached: {skill_wise_data['avg_difficulty_reached']}
+
+Skill breakdown:
+{json.dumps({k: {'score': v['score'], 'proficiency': v['proficiency'], 'performance': v['performance']} for k, v in skill_wise_data['skills_breakdown'].items()}, ensure_ascii=False)}
+
+Top 3 skills: {', '.join(skill_wise_data['top_skills'])}
+Needs work: {', '.join(skill_wise_data['weakest_skills'])}
+
+Per-question evaluations:
+{json.dumps(evaluations, ensure_ascii=False)}
+
+Return valid JSON:
+{{
+  "summary": "3 to 4 sentence summary focusing on technical skill proficiency and adaptive learning curve",
+  "top_strengths": ["up to 3 key technical strengths"],
+  "improvement_areas": ["up to 3 key technical areas needing improvement"],
+  "strongest_questions": ["question texts with best performance"],
+  "needs_work_questions": ["question texts with lowest performance"]
+}}
+"""
+        
+        try:
+            summary_ai, provider = await _generate_json_with_fallback(
+                prompt,
+                ["gemini", "ollama"],
+                0.2,
+                LIVE_AI_TIMEOUT_SECONDS,
+            )
+        except ProviderError:
+            summary_ai = {}
+            provider = "fallback"
+        
+        # Build skill-wise report
+        summary = {
+            "overall_score": skill_wise_data["overall_score"],
+            "summary": _normalize_text(summary_ai.get("summary", "")),
+            "top_strengths": _safe_list(summary_ai.get("top_strengths")) or ["Completed adaptive interview with progressive difficulty"],
+            "improvement_areas": _safe_list(summary_ai.get("improvement_areas")) or ["Continue developing technical depth"],
+            "strongest_questions": _safe_list(summary_ai.get("strongest_questions")) or [],
+            "needs_work_questions": _safe_list(summary_ai.get("needs_work_questions")) or [],
+            "interview_type": "resume_adaptive",
+            "skills_breakdown": skill_wise_data["skills_breakdown"],
+            "top_skills": skill_wise_data["top_skills"],
+            "weakest_skills": skill_wise_data["weakest_skills"],
+            "avg_difficulty_reached": skill_wise_data["avg_difficulty_reached"],
+            "adaptive_insights": {
+                "total_evaluations": skill_wise_data["total_evaluations"],
+                "learning_curve": "Consistent progression" if skill_wise_data["avg_difficulty_reached"] in ["Hard", "Medium"] else "Building foundation",
+            }
+        }
+    else:
+        # Standard report for non-adaptive interviews
+        adaptive_summary = ""
+        if adaptive_state.get("enabled"):
+            adaptive_summary = f"\nDiscovered candidate profile:\n{_adaptive_state_summary(adaptive_state)}\n"
+        prompt = f"""
 You are summarizing an AI interview session.
 
 Interview context:
@@ -5642,31 +6349,31 @@ Return valid JSON:
 }}
 """
 
-    try:
-        summary, provider = await _generate_json_with_fallback(
-            prompt,
-            ["gemini", "ollama"],
-            0.2,
-            LIVE_AI_TIMEOUT_SECONDS,
-        )
-    except ProviderError:
-        summary = _fallback_summary(session)
-        provider = "fallback"
+        try:
+            summary, provider = await _generate_json_with_fallback(
+                prompt,
+                ["gemini", "ollama"],
+                0.2,
+                LIVE_AI_TIMEOUT_SECONDS,
+            )
+        except ProviderError:
+            summary = _fallback_summary(session)
+            provider = "fallback"
 
-    if provider != "fallback":
-        fallback = _fallback_summary(session)
-        summary = {
-            "overall_score": int(summary.get("overall_score", fallback["overall_score"])),
-            "summary": _normalize_text(summary.get("summary") or fallback["summary"]),
-            "top_strengths": _safe_list(summary.get("top_strengths")) or fallback["top_strengths"],
-            "improvement_areas": _safe_list(summary.get("improvement_areas")) or fallback["improvement_areas"],
-            "strongest_questions": _safe_list(summary.get("strongest_questions")) or fallback["strongest_questions"],
-            "needs_work_questions": _safe_list(summary.get("needs_work_questions")) or fallback["needs_work_questions"],
-        }
-        if is_hr_session:
-            summary["score_breakdown"] = fallback.get("score_breakdown") or _build_hr_score_breakdown(session)
-    elif is_hr_session and "score_breakdown" not in summary:
-        summary["score_breakdown"] = _build_hr_score_breakdown(session)
+        if provider != "fallback":
+            fallback = _fallback_summary(session)
+            summary = {
+                "overall_score": int(summary.get("overall_score", fallback["overall_score"])),
+                "summary": _normalize_text(summary.get("summary") or fallback["summary"]),
+                "top_strengths": _safe_list(summary.get("top_strengths")) or fallback["top_strengths"],
+                "improvement_areas": _safe_list(summary.get("improvement_areas")) or fallback["improvement_areas"],
+                "strongest_questions": _safe_list(summary.get("strongest_questions")) or fallback["strongest_questions"],
+                "needs_work_questions": _safe_list(summary.get("needs_work_questions")) or fallback["needs_work_questions"],
+            }
+            if is_hr_session:
+                summary["score_breakdown"] = fallback.get("score_breakdown") or _build_hr_score_breakdown(session)
+        elif is_hr_session and "score_breakdown" not in summary:
+            summary["score_breakdown"] = _build_hr_score_breakdown(session)
 
     session["summary"] = summary
     session["ended_early"] = bool(ended_early)

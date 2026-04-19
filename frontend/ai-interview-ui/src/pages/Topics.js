@@ -2,45 +2,12 @@ import React from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import "../App.css";
 import MiniNavbar from "../components/MiniNavbar";
-
-const JOB_ROLES = [
-  "Frontend Developer",
-  "Backend Developer",
-  "Full Stack Developer",
-  "Software Engineer",
-  "Data Analyst",
-  "Data Engineer",
-  "Data Scientist",
-  "Machine Learning Engineer",
-  "AI Engineer",
-  "QA Engineer",
-  "Automation Engineer",
-  "DevOps Engineer",
-  "Site Reliability Engineer",
-  "Cloud Engineer",
-  "Security Engineer",
-  "Product Manager",
-  "Project Manager",
-  "Business Analyst",
-  "UI/UX Designer",
-  "Graphic Designer",
-  "Mobile Developer",
-  "iOS Developer",
-  "Android Developer",
-  "System Architect",
-  "Solution Architect",
-  "Database Administrator",
-  "Network Engineer",
-  "Technical Support Engineer",
-  "Technical Writer",
-  "HR Executive",
-  "Talent Acquisition Specialist",
-  "Customer Success Manager",
-  "Operations Manager",
-  "Marketing Analyst",
-  "Sales Executive",
-  "Finance Analyst",
-];
+import {
+  TECHNICAL_JOB_ROLES,
+  NON_TECHNICAL_JOB_ROLES,
+  getResolvedJobRole,
+  getRoleSuggestions,
+} from "../utils/roleSearch";
 
 const LANGUAGE_OPTIONS = [
   "JavaScript",
@@ -180,15 +147,23 @@ function Topics() {
   const modeOptions =
     selectedMode === "language"
       ? LANGUAGE_OPTIONS
-      : selectedMode === "role" || selectedMode === "hr"
-        ? JOB_ROLES
+      : selectedMode === "role"
+        ? TECHNICAL_JOB_ROLES
+        : selectedMode === "hr"
+          ? NON_TECHNICAL_JOB_ROLES
         : [];
 
   const suggestedOptions = searchTerm.trim()
-    ? modeOptions.filter((option) =>
-        option.toLowerCase().startsWith(searchTerm.trim().toLowerCase())
-      )
+    ? getRoleSuggestions(searchTerm, modeOptions)
     : [];
+
+  const resolveSearchSelection = React.useCallback(() => {
+    if (!searchTerm.trim()) return;
+    const resolvedOption = getResolvedJobRole(searchTerm, modeOptions);
+    if (!resolvedOption) return;
+    toggleSelectionOption(resolvedOption);
+    setSearchTerm("");
+  }, [modeOptions, searchTerm, selectedMode]);
 
   const resetConfiguration = React.useCallback((nextRound = "hr_behavioral") => {
     setSearchTerm("");
@@ -469,6 +444,13 @@ function Topics() {
                     value={searchTerm}
                     onChange={(event) => setSearchTerm(event.target.value)}
                     placeholder={selectedMode === "language" ? "Search languages..." : "Search job roles..."}
+                    onBlur={() => window.setTimeout(resolveSearchSelection, 100)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        resolveSearchSelection();
+                      }
+                    }}
                     disabled={isLocked}
                     style={{
                       flex: 1,

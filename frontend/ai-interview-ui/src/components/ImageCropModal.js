@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback } from "react";
 import Cropper from "react-easy-crop";
 
 const createImage = (url) =>
@@ -71,30 +71,12 @@ const getCroppedImage = async (imageSrc, pixelCrop, rotation = 0) => {
   return croppedCanvas.toDataURL(outputType, 0.92);
 };
 
-const cropHandleDirections = [
-  { key: "top", axisX: 0, axisY: -1, cursor: "ns-resize" },
-  { key: "right", axisX: 1, axisY: 0, cursor: "ew-resize" },
-  { key: "bottom", axisX: 0, axisY: 1, cursor: "ns-resize" },
-  { key: "left", axisX: -1, axisY: 0, cursor: "ew-resize" },
-  { key: "top-left", axisX: -1, axisY: -1, cursor: "nwse-resize" },
-  { key: "top-right", axisX: 1, axisY: -1, cursor: "nesw-resize" },
-  { key: "bottom-right", axisX: 1, axisY: 1, cursor: "nwse-resize" },
-  { key: "bottom-left", axisX: -1, axisY: 1, cursor: "nesw-resize" }
-];
-
-const MIN_CROP_FRAME = 80;
-
-const clampCropFrame = (frame) => ({
-  width: Math.max(MIN_CROP_FRAME, Math.min(300, Math.round(frame.width))),
-  height: Math.max(MIN_CROP_FRAME, Math.min(280, Math.round(frame.height)))
-});
 
 const ImageCropModal = ({ image, onClose, onSave }) => {
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
-  const [cropFrame, setCropFrame] = useState({ width: 180, height: 180 });
-  const [mediaBounds, setMediaBounds] = useState({ width: 300, height: 280 });
+  const cropSize = { width: 240, height: 240 };
   const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -102,50 +84,6 @@ const ImageCropModal = ({ image, onClose, onSave }) => {
   const onCropComplete = useCallback((_, pixels) => {
     setCroppedAreaPixels(pixels);
   }, []);
-
-  useEffect(() => {
-    setCropFrame((currentFrame) => {
-      const nextFrame = {
-        width: Math.min(currentFrame.width, mediaBounds.width),
-        height: Math.min(currentFrame.height, mediaBounds.height)
-      };
-
-      return clampCropFrame(nextFrame);
-    });
-  }, [mediaBounds]);
-
-  const handleCropResizeStart = (event, axisX, axisY) => {
-    event.preventDefault();
-    event.stopPropagation();
-
-    const startX = event.clientX;
-    const startY = event.clientY;
-    const startFrame = cropFrame;
-
-    const handlePointerMove = (moveEvent) => {
-      const deltaX = moveEvent.clientX - startX;
-      const deltaY = moveEvent.clientY - startY;
-      const nextWidth =
-        axisX === 0 ? startFrame.width : startFrame.width + (deltaX * axisX * 2);
-      const nextHeight =
-        axisY === 0 ? startFrame.height : startFrame.height + (deltaY * axisY * 2);
-
-      setCropFrame(
-        clampCropFrame({
-          width: Math.min(nextWidth, mediaBounds.width),
-          height: Math.min(nextHeight, mediaBounds.height)
-        })
-      );
-    };
-
-    const handlePointerUp = () => {
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-    };
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-  };
 
   const handleSave = async () => {
     if (!croppedAreaPixels) return;
@@ -189,54 +127,32 @@ const ImageCropModal = ({ image, onClose, onSave }) => {
             crop={crop}
             zoom={zoom}
             rotation={rotation}
-            aspect={cropFrame.width / cropFrame.height}
-            cropSize={cropFrame}
-            restrictPosition
+            aspect={1}
+            cropSize={cropSize}
+            cropShape="round"
+            showGrid={false}
+            minZoom={0.5}
+            maxZoom={4}
+            zoomSpeed={0.5}
+            restrictPosition={false}
             onCropChange={setCrop}
             onZoomChange={setZoom}
             onRotationChange={setRotation}
             onCropComplete={onCropComplete}
-            onMediaLoaded={(mediaSize) => {
-              setMediaBounds({
-                width: Math.max(MIN_CROP_FRAME, Math.min(300, Math.floor(mediaSize.width))),
-                height: Math.max(MIN_CROP_FRAME, Math.min(280, Math.floor(mediaSize.height)))
-              });
-            }}
           />
-          <div
-            className="profile-editor-modal__crop-outline"
-            style={{
-              width: cropFrame.width,
-              height: cropFrame.height
-            }}
-          >
-            {cropHandleDirections.map((handle) => (
-              <button
-                key={handle.key}
-                type="button"
-                className={`profile-editor-modal__stretch-handle profile-editor-modal__stretch-handle--${handle.key}`}
-                style={{ cursor: handle.cursor }}
-                onPointerDown={(event) =>
-                  handleCropResizeStart(event, handle.axisX, handle.axisY)
-                }
-                aria-label={`Resize crop area from ${handle.key}`}
-                title="Drag to stretch crop box"
-              />
-            ))}
-          </div>
         </div>
 
         <div className="profile-editor-modal__controls">
           <label className="profile-editor-modal__control">
             <span className="profile-editor-modal__control-label">
               Zoom
-              <strong>{zoom.toFixed(1)}x</strong>
+              <strong>{zoom.toFixed(2)}x</strong>
             </span>
             <input
               type="range"
-              min={1}
-              max={3}
-              step={0.1}
+              min={0.5}
+              max={4}
+              step={0.05}
               value={zoom}
               onChange={(e) => setZoom(Number(e.target.value))}
               className="profile-editor-modal__range"
