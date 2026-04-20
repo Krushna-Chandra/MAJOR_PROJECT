@@ -7,6 +7,8 @@ import aptitudeHero from "../assets/aptitude.png";
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || "http://127.0.0.1:8000";
 const CODING_HISTORY_KEY = "apis-coding-question-history";
+const CODING_POOL_KEY = "apis-coding-question-pool";
+const HIDDEN_LANGUAGE_IDS = new Set(["go", "rust", "php", "ruby", "kotlin", "swift"]);
 
 const SECTION_OPTIONS = [
   { id: "aptitude", title: "Aptitude", mode: "mcq", description: "Quantitative practice with arithmetic, percentage, ratio, averages, and data questions." },
@@ -162,7 +164,7 @@ function getStarterCode(challenge, language) {
 function getCodingChallengeKey(challenge) {
   const title = String(challenge?.title || challenge?.question || "").trim().toLowerCase();
   const description = String(challenge?.description || challenge?.prompt || "").trim().toLowerCase();
-  return `${title}::${description}`;
+  return title || description;
 }
 
 function loadSeenCodingQuestions() {
@@ -177,6 +179,43 @@ function loadSeenCodingQuestions() {
 
 function saveSeenCodingQuestions(data) {
   window.localStorage.setItem(CODING_HISTORY_KEY, JSON.stringify(data));
+}
+
+function filterVisibleLanguages(languages = []) {
+  return languages.filter((language) => !HIDDEN_LANGUAGE_IDS.has(language.id));
+}
+
+function loadCodingQuestionPool() {
+  try {
+    const raw = window.localStorage.getItem(CODING_POOL_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return typeof parsed === "object" && parsed ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveCodingQuestionPool(data) {
+  window.localStorage.setItem(CODING_POOL_KEY, JSON.stringify(data));
+}
+
+function dedupeCodingChallenges(challenges = [], excludedKeys = [], limit = Infinity) {
+  const seen = new Set(excludedKeys);
+  const unique = [];
+
+  for (const challenge of challenges) {
+    const key = getCodingChallengeKey(challenge);
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    unique.push(challenge);
+    if (unique.length >= limit) {
+      break;
+    }
+  }
+
+  return unique;
 }
 
 function buildLocalCodingFallback(level, index) {
@@ -206,6 +245,46 @@ function buildLocalCodingFallback(level, index) {
         examples: [{ input: "1 2 3 4 5 6", output: "3", explanation: "2, 4, and 6 are even." }],
         public_test_cases: [{ input: "10 15 20 25", expected_output: "2" }, { input: "7 9 11", expected_output: "0" }],
       },
+      {
+        title: "Count Positive Numbers",
+        description: "Given a space-separated list of integers, print how many numbers are greater than zero.",
+        constraints: ["1 <= number of integers <= 10^5"],
+        hints: ["Split the input and count values above zero."],
+        examples: [{ input: "-1 0 4 7 -3", output: "2", explanation: "Only 4 and 7 are positive." }],
+        public_test_cases: [{ input: "1 2 3", expected_output: "3" }, { input: "-5 -2 0", expected_output: "0" }],
+      },
+      {
+        title: "Largest Digit in a Number",
+        description: "Given a non-negative integer, print the largest digit present in it.",
+        constraints: ["0 <= n <= 10^18"],
+        hints: ["Process the number as a string or digit by digit."],
+        examples: [{ input: "48219", output: "9", explanation: "9 is the largest digit." }],
+        public_test_cases: [{ input: "700", expected_output: "7" }, { input: "12345", expected_output: "5" }],
+      },
+      {
+        title: "Reverse Each Word",
+        description: "Given a sentence, reverse every word individually while preserving word order.",
+        constraints: ["1 <= length of input <= 10^5"],
+        hints: ["Split into words, reverse each word, then join."],
+        examples: [{ input: "code daily", output: "edoc yliad", explanation: "Each word is reversed in place." }],
+        public_test_cases: [{ input: "hello world", expected_output: "olleh dlrow" }, { input: "a bc def", expected_output: "a cb fed" }],
+      },
+      {
+        title: "Second Largest Number",
+        description: "Given a space-separated list of distinct integers, print the second largest value.",
+        constraints: ["2 <= number of integers <= 10^5", "All values are distinct"],
+        hints: ["Track the largest and second largest values while scanning."],
+        examples: [{ input: "3 8 2 10 6", output: "8", explanation: "10 is largest, so 8 is second largest." }],
+        public_test_cases: [{ input: "1 9", expected_output: "1" }, { input: "4 7 2 11 5", expected_output: "7" }],
+      },
+      {
+        title: "Count Words With Vowels",
+        description: "Given a line of text, print how many words contain at least one vowel.",
+        constraints: ["1 <= number of words <= 10^5", "Treat vowels case-insensitively"],
+        hints: ["Split by whitespace and check each word for vowels."],
+        examples: [{ input: "sky apple dry orange", output: "2", explanation: "Only apple and orange contain vowels." }],
+        public_test_cases: [{ input: "code gym fly", expected_output: "1" }, { input: "a e i", expected_output: "3" }],
+      },
     ],
     medium: [
       {
@@ -232,6 +311,46 @@ function buildLocalCodingFallback(level, index) {
         examples: [{ input: "1 2 3 4", output: "24 12 8 6", explanation: "Each index gets the product of all other numbers." }],
         public_test_cases: [{ input: "2 3 4 5", expected_output: "60 40 30 24" }],
       },
+      {
+        title: "Top K Frequent Numbers",
+        description: "Given a space-separated list of integers and a final integer k on the next line, print the k most frequent numbers in descending frequency order, breaking ties by smaller number first.",
+        constraints: ["1 <= n <= 10^5", "1 <= k <= number of distinct values"],
+        hints: ["Count frequencies with a hash map, then sort by frequency and value."],
+        examples: [{ input: "1 1 1 2 2 3\n2", output: "1 2", explanation: "1 appears three times and 2 appears twice." }],
+        public_test_cases: [{ input: "4 4 4 6 6 8\n2", expected_output: "4 6" }, { input: "5 5 1 1 2 2\n1", expected_output: "1" }],
+      },
+      {
+        title: "Merge Overlapping Intervals",
+        description: "Given intervals as lines of 'start end', merge all overlapping intervals and print the merged intervals in order.",
+        constraints: ["1 <= number of intervals <= 10^5"],
+        hints: ["Sort by start time, then merge while overlaps continue."],
+        examples: [{ input: "1 3\n2 6\n8 10\n15 18", output: "1 6\n8 10\n15 18", explanation: "The first two intervals overlap and merge." }],
+        public_test_cases: [{ input: "1 4\n4 5", expected_output: "1 5" }, { input: "1 2\n3 4", expected_output: "1 2\n3 4" }],
+      },
+      {
+        title: "Longest Subarray With Sum K",
+        description: "Given a space-separated list of integers and a target k on the next line, print the length of the longest contiguous subarray whose sum equals k.",
+        constraints: ["1 <= n <= 10^5", "-10^9 <= values <= 10^9"],
+        hints: ["Use prefix sums and store the earliest index for each prefix sum."],
+        examples: [{ input: "1 -1 5 -2 3\n3", output: "4", explanation: "The subarray [1, -1, 5, -2] sums to 3." }],
+        public_test_cases: [{ input: "-2 -1 2 1\n1", expected_output: "2" }, { input: "1 2 3 4 5\n9", expected_output: "3" }],
+      },
+      {
+        title: "Validate Bracket Sequence",
+        description: "Given a string containing only brackets (), {}, and [], print Valid if the sequence is balanced, otherwise print Invalid.",
+        constraints: ["1 <= length <= 10^5"],
+        hints: ["Use a stack and match each closing bracket with the latest opening bracket."],
+        examples: [{ input: "{[()]}", output: "Valid", explanation: "All brackets close in the correct order." }],
+        public_test_cases: [{ input: "([)]", expected_output: "Invalid" }, { input: "(()[])", expected_output: "Valid" }],
+      },
+      {
+        title: "Spiral Order of Matrix",
+        description: "Given a matrix where each line is a row of space-separated integers, print the elements in spiral order.",
+        constraints: ["1 <= rows, cols <= 100"],
+        hints: ["Track top, bottom, left, and right boundaries."],
+        examples: [{ input: "1 2 3\n4 5 6\n7 8 9", output: "1 2 3 6 9 8 7 4 5", explanation: "Traverse layer by layer in spiral order." }],
+        public_test_cases: [{ input: "1 2\n3 4", expected_output: "1 2 4 3" }, { input: "1 2 3 4", expected_output: "1 2 3 4" }],
+      },
     ],
     hard: [
       {
@@ -257,6 +376,46 @@ function buildLocalCodingFallback(level, index) {
         hints: ["Use a monotonic increasing stack."],
         examples: [{ input: "2 1 5 6 2 3", output: "10", explanation: "The best rectangle spans heights 5 and 6." }],
         public_test_cases: [{ input: "2 4", expected_output: "4" }, { input: "6 2 5 4 5 1 6", expected_output: "12" }],
+      },
+      {
+        title: "Sliding Window Maximum",
+        description: "Given a space-separated list of integers and a window size k on the next line, print the maximum for each sliding window.",
+        constraints: ["1 <= n <= 10^5", "Use an efficient approach better than O(nk)"],
+        hints: ["Use a deque to keep candidate indices in decreasing order."],
+        examples: [{ input: "1 3 -1 -3 5 3 6 7\n3", output: "3 3 5 5 6 7", explanation: "Each output is the max of its window." }],
+        public_test_cases: [{ input: "9 10 9 -7 -4 -8 2 -6\n5", expected_output: "10 10 9 2" }, { input: "1\n1", expected_output: "1" }],
+      },
+      {
+        title: "Trapping Rain Water",
+        description: "Given space-separated bar heights, print the total units of water trapped after raining.",
+        constraints: ["1 <= number of bars <= 2 * 10^5"],
+        hints: ["Use two pointers or prefix and suffix maximum arrays."],
+        examples: [{ input: "0 1 0 2 1 0 1 3 2 1 2 1", output: "6", explanation: "The histogram traps 6 units of water." }],
+        public_test_cases: [{ input: "4 2 0 3 2 5", expected_output: "9" }, { input: "1 2 3 4", expected_output: "0" }],
+      },
+      {
+        title: "Median of Running Stream",
+        description: "Given a stream of integers as a space-separated list, print the median after each insertion.",
+        constraints: ["1 <= n <= 10^5"],
+        hints: ["Maintain two heaps and balance them after each insertion."],
+        examples: [{ input: "5 15 1 3", output: "5 10 5 4", explanation: "The running medians are 5, 10, 5, and 4." }],
+        public_test_cases: [{ input: "2 4 6", expected_output: "2 3 4" }, { input: "1 1 1", expected_output: "1 1 1" }],
+      },
+      {
+        title: "Word Ladder Steps",
+        description: "Given a begin word, end word, and a dictionary of lowercase words on separate lines, print the minimum number of transformations needed to reach the end word, changing one letter at a time. Print 0 if impossible.",
+        constraints: ["All words have the same length.", "1 <= dictionary size <= 5000"],
+        hints: ["Breadth-first search works well.", "Generate one-letter transformations efficiently."],
+        examples: [{ input: "hit\ncog\nhot dot dog lot log cog", output: "5", explanation: "One shortest path is hit -> hot -> dot -> dog -> cog." }],
+        public_test_cases: [{ input: "hit\ncog\nhot dot dog lot log cog", expected_output: "5" }, { input: "hit\ncog\nhot dot dog lot log", expected_output: "0" }],
+      },
+      {
+        title: "Alien Dictionary Order",
+        description: "Given sorted dictionary words from an alien language, print one valid character order. Print Invalid if no order exists.",
+        constraints: ["1 <= number of words <= 10^4"],
+        hints: ["Build a graph from the first differing character between adjacent words, then use topological sorting."],
+        examples: [{ input: "baa abcd abca cab cad", output: "bdac", explanation: "bdac is one valid topological ordering." }],
+        public_test_cases: [{ input: "caa aaa aab", expected_output: "cab" }, { input: "abc ab", expected_output: "Invalid" }],
       },
     ],
   };
@@ -312,6 +471,59 @@ function buildGuaranteedCodingSession(level, count, excludedKeys = []) {
   return filledItems;
 }
 
+function normalizeCodingChallenge(rawChallenge, index) {
+  return {
+    ...rawChallenge,
+    sessionId: `coding-challenge-${index + 1}`,
+    type: "coding",
+    question: rawChallenge.title || `Coding Question ${index + 1}`,
+    prompt: rawChallenge.description || "",
+  };
+}
+
+async function fetchUniqueCodingChallenges(level, desiredCount, excludedKeys = []) {
+  const uniqueChallenges = [];
+  const seenChallengeKeys = new Set((excludedKeys || []).filter(Boolean));
+  let attempts = 0;
+  const maxAttempts = Math.max(desiredCount * 4, 12);
+
+  while (uniqueChallenges.length < desiredCount && attempts < maxAttempts) {
+    const remaining = desiredCount - uniqueChallenges.length;
+    const batchSize = Math.min(Math.max(remaining, 2), 4);
+    attempts += batchSize;
+
+    const responses = await Promise.all(
+      Array.from({ length: batchSize }, () =>
+        axios.post(`${API_BASE_URL}/coding/challenge`, {
+          difficulty: level,
+          excluded_questions: Array.from(seenChallengeKeys),
+        }).catch(() => null)
+      )
+    );
+
+    responses.forEach((response) => {
+      const rawChallenge = response?.data?.challenge;
+      if (!rawChallenge || uniqueChallenges.length >= desiredCount) {
+        return;
+      }
+
+      const normalizedChallenge = normalizeCodingChallenge(rawChallenge, uniqueChallenges.length);
+      const challengeKey = getCodingChallengeKey(normalizedChallenge);
+      if (!challengeKey || seenChallengeKeys.has(challengeKey)) {
+        return;
+      }
+
+      seenChallengeKeys.add(challengeKey);
+      uniqueChallenges.push(normalizedChallenge);
+    });
+  }
+
+  return {
+    challenges: uniqueChallenges,
+    seenKeys: Array.from(seenChallengeKeys),
+  };
+}
+
 function AptitudeTest() {
   const [stage, setStage] = useState("landing");
   const [selectedSection, setSelectedSection] = useState("aptitude");
@@ -323,11 +535,15 @@ function AptitudeTest() {
   const [summary, setSummary] = useState(null);
   const [runtimeLanguages, setRuntimeLanguages] = useState([]);
   const [codingLevel, setCodingLevel] = useState("easy");
-  const [codingLanguage, setCodingLanguage] = useState("javascript");
+  const [codingLanguage, setCodingLanguage] = useState("");
   const [codingRunResults, setCodingRunResults] = useState([]);
+  const [codingRunSources, setCodingRunSources] = useState([]);
   const [codingSubmitResults, setCodingSubmitResults] = useState([]);
-  const [codingLoading, setCodingLoading] = useState(false);
+  const [, setCodingLoading] = useState(false);
+  const [codingRunLoading, setCodingRunLoading] = useState(false);
+  const [codingSubmitLoading, setCodingSubmitLoading] = useState(false);
   const [codingError, setCodingError] = useState("");
+  const [codingTimerStarted, setCodingTimerStarted] = useState(false);
   const [startingTest, setStartingTest] = useState(false);
   const setupSectionRef = useRef(null);
 
@@ -345,6 +561,8 @@ function AptitudeTest() {
   const isOverviewStage = stage === "landing" || stage === "setup";
   const selectedRuntime = useMemo(() => runtimeLanguages.find((item) => item.id === codingLanguage) || null, [runtimeLanguages, codingLanguage]);
   const currentCodingRunResult = codingRunResults[currentIndex] || null;
+  const isCodingBusy = codingRunLoading || codingSubmitLoading;
+  const hasSelectedCodingLanguage = Boolean(codingLanguage);
 
   useEffect(() => {
     let ignore = false;
@@ -360,26 +578,21 @@ function AptitudeTest() {
           { id: "cpp", label: "C++", available: false },
           { id: "csharp", label: "C#", available: false },
           { id: "typescript", label: "TypeScript", available: false },
-          { id: "go", label: "Go", available: false },
-          { id: "rust", label: "Rust", available: false },
-          { id: "php", label: "PHP", available: false },
-          { id: "ruby", label: "Ruby", available: false },
-          { id: "kotlin", label: "Kotlin", available: false },
-          { id: "swift", label: "Swift", available: false },
         ];
         const languages = Array.isArray(response.data?.languages) && response.data.languages.length ? response.data.languages : fallback;
-        setRuntimeLanguages(languages);
-        const preferredLanguage = languages.find((item) => item.available)?.id || languages[0].id;
-        setCodingLanguage((current) => (languages.some((item) => item.id === current) ? current : preferredLanguage));
+        const visibleLanguages = filterVisibleLanguages(languages);
+        setRuntimeLanguages(visibleLanguages);
+        setCodingLanguage((current) => (visibleLanguages.some((item) => item.id === current) ? current : ""));
       } catch {
         if (!ignore) {
-          setRuntimeLanguages([
+          setRuntimeLanguages(filterVisibleLanguages([
             { id: "javascript", label: "JavaScript (Node.js)", available: true },
             { id: "java", label: "Java", available: true },
             { id: "python", label: "Python", available: false },
             { id: "c", label: "C", available: false },
             { id: "cpp", label: "C++", available: false },
-          ]);
+          ]));
+          setCodingLanguage("");
         }
       }
     };
@@ -395,7 +608,7 @@ function AptitudeTest() {
   }, [codingMode, selectedSection]);
 
   useEffect(() => {
-    if (!codingMode || !currentQuestion) return;
+    if (!codingMode || !currentQuestion || !codingLanguage) return;
     setAnswers((currentAnswers) => {
       if ((currentAnswers[currentIndex] || "").trim()) {
         return currentAnswers;
@@ -407,7 +620,14 @@ function AptitudeTest() {
   }, [codingLanguage, codingMode, currentIndex, currentQuestion]);
 
   useEffect(() => {
+    if (stage !== "test" || !codingMode || !currentQuestion || codingTimerStarted) return;
+    setTimeLeft(configuredDuration);
+    setCodingTimerStarted(true);
+  }, [codingMode, codingTimerStarted, configuredDuration, currentQuestion, stage]);
+
+  useEffect(() => {
     if (stage !== "test") return undefined;
+    if (codingMode && (!codingTimerStarted || !currentQuestion)) return undefined;
     if (timeLeft <= 0) {
       if (codingMode && (answers[currentIndex] || "").trim()) {
         void handleSubmitCode("auto");
@@ -440,8 +660,12 @@ function AptitudeTest() {
     setSummary(null);
     setTimeLeft(0);
     setCodingRunResults([]);
+    setCodingRunSources([]);
     setCodingSubmitResults([]);
+    setCodingRunLoading(false);
+    setCodingSubmitLoading(false);
     setCodingError("");
+    setCodingTimerStarted(false);
     scrollToSetupSection();
   }
 
@@ -450,91 +674,75 @@ function AptitudeTest() {
     setStartingTest(true);
 
     if (codingMode) {
+      const seenHistory = loadSeenCodingQuestions();
+      const seenForLevel = Array.isArray(seenHistory[codingLevel]) ? seenHistory[codingLevel] : [];
+      const questionPool = loadCodingQuestionPool();
+      const poolForLevel = Array.isArray(questionPool[codingLevel]) ? questionPool[codingLevel] : [];
+      const pooledChallenges = dedupeCodingChallenges(poolForLevel, seenForLevel, configuredQuestionCount);
+      const fallbackChallenges = buildGuaranteedCodingSession(
+        codingLevel,
+        configuredQuestionCount - pooledChallenges.length,
+        [...seenForLevel, ...pooledChallenges.map((challenge) => getCodingChallengeKey(challenge))],
+      );
+      const initialChallenges = [...pooledChallenges, ...fallbackChallenges];
+      const remainingPool = poolForLevel.filter((challenge) => {
+        const key = getCodingChallengeKey(challenge);
+        return key && !initialChallenges.some((item) => getCodingChallengeKey(item) === key);
+      });
+
+      setQuestions(initialChallenges);
+      setAnswers(new Array(initialChallenges.length).fill(""));
+      setCodingRunResults(new Array(initialChallenges.length).fill(null));
+      setCodingRunSources(new Array(initialChallenges.length).fill(""));
+      setCodingSubmitResults(new Array(initialChallenges.length).fill(null));
+      setCurrentIndex(0);
+      setTimeLeft(0);
+      setSummary(null);
+      setCodingTimerStarted(false);
+      setStage("test");
+      window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+
+      saveSeenCodingQuestions({
+        ...seenHistory,
+        [codingLevel]: [...seenForLevel, ...initialChallenges.map((challenge) => getCodingChallengeKey(challenge))].slice(-1000),
+      });
+      saveCodingQuestionPool({
+        ...questionPool,
+        [codingLevel]: remainingPool.slice(-60),
+      });
+
+      setStartingTest(false);
       setCodingLoading(true);
       setCodingError("");
-      try {
-        const seenHistory = loadSeenCodingQuestions();
-        const seenForLevel = Array.isArray(seenHistory[codingLevel]) ? seenHistory[codingLevel] : [];
-        const uniqueChallenges = [];
-        const seenChallengeKeys = new Set();
-        let attempts = 0;
-        const maxAttempts = Math.max(configuredQuestionCount * 6, 12);
 
-        while (uniqueChallenges.length < configuredQuestionCount && attempts < maxAttempts) {
-          attempts += 1;
-          const response = await axios.post(`${API_BASE_URL}/coding/challenge`, {
-            difficulty: codingLevel,
-            excluded_questions: [...seenForLevel, ...Array.from(seenChallengeKeys)],
+      void (async () => {
+        try {
+          const aiSeedExclusions = [
+            ...seenForLevel,
+            ...initialChallenges.map((challenge) => getCodingChallengeKey(challenge)),
+            ...remainingPool.map((challenge) => getCodingChallengeKey(challenge)),
+          ];
+          const { challenges: aiChallenges } = await fetchUniqueCodingChallenges(
+            codingLevel,
+            configuredQuestionCount + 8,
+            aiSeedExclusions,
+          );
+
+          if (!aiChallenges.length) {
+            return;
+          }
+
+          const reserveChallenges = aiChallenges.slice(0, 60);
+          saveCodingQuestionPool({
+            ...questionPool,
+            [codingLevel]: dedupeCodingChallenges([...remainingPool, ...reserveChallenges], seenForLevel, 60),
           });
-          const rawChallenge = response.data?.challenge;
-          if (!rawChallenge) {
-            continue;
-          }
-          const normalizedChallenge = {
-            ...rawChallenge,
-            sessionId: `coding-challenge-${uniqueChallenges.length + 1}`,
-            type: "coding",
-            question: rawChallenge.title || `Coding Question ${uniqueChallenges.length + 1}`,
-            prompt: rawChallenge.description || "",
-          };
-          const challengeKey = getCodingChallengeKey(normalizedChallenge);
-          if (!challengeKey || seenChallengeKeys.has(challengeKey)) {
-            continue;
-          }
-          seenChallengeKeys.add(challengeKey);
-          uniqueChallenges.push(normalizedChallenge);
+        } catch (error) {
+          setCodingError(error?.response?.data?.detail || "Coding test started with ready questions. Fresh AI questions are still warming up.");
+        } finally {
+          setCodingLoading(false);
         }
-
-        const challengeList = [...uniqueChallenges];
-        while (challengeList.length < configuredQuestionCount) {
-          const fallbackChallenge = buildLocalCodingFallback(codingLevel, challengeList.length);
-          const fallbackKey = getCodingChallengeKey(fallbackChallenge);
-          if (!seenChallengeKeys.has(fallbackKey)) {
-            seenChallengeKeys.add(fallbackKey);
-            challengeList.push(fallbackChallenge);
-          } else {
-            break;
-          }
-        }
-        if (!challengeList.length) throw new Error("Missing coding challenge payload.");
-        const nextSeenHistory = {
-          ...seenHistory,
-          [codingLevel]: [...seenForLevel, ...challengeList.map((challenge) => getCodingChallengeKey(challenge))].slice(-300),
-        };
-        saveSeenCodingQuestions(nextSeenHistory);
-        if (challengeList.length < configuredQuestionCount) {
-          setCodingError(`Only ${challengeList.length} unique coding questions could be prepared right now, so the session started with the available unique set.`);
-        }
-        setQuestions(challengeList);
-        setAnswers(challengeList.map((challenge) => getStarterCode(challenge, codingLanguage)));
-        setCodingRunResults(new Array(challengeList.length).fill(null));
-        setCodingSubmitResults(new Array(challengeList.length).fill(null));
-        setCurrentIndex(0);
-        setTimeLeft(configuredDuration);
-        setSummary(null);
-        setStage("test");
-      } catch (error) {
-        const seenHistory = loadSeenCodingQuestions();
-        const seenForLevel = Array.isArray(seenHistory[codingLevel]) ? seenHistory[codingLevel] : [];
-        const fallbackChallenges = buildGuaranteedCodingSession(codingLevel, configuredQuestionCount, seenForLevel);
-        setQuestions(fallbackChallenges);
-        setAnswers(fallbackChallenges.map((challenge) => getStarterCode(challenge, codingLanguage)));
-        setCodingRunResults(new Array(fallbackChallenges.length).fill(null));
-        setCodingSubmitResults(new Array(fallbackChallenges.length).fill(null));
-        setCurrentIndex(0);
-        setTimeLeft(configuredDuration);
-        setSummary(null);
-        setStage("test");
-        saveSeenCodingQuestions({
-          ...seenHistory,
-          [codingLevel]: [...seenForLevel, ...fallbackChallenges.map((challenge) => getCodingChallengeKey(challenge))].slice(-300),
-        });
-        setCodingError(error?.response?.data?.detail || "AI coding generation failed, so fallback coding questions were loaded.");
-      } finally {
-        setCodingLoading(false);
-        setStartingTest(false);
-        window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
-      }
+      })();
       return;
     }
 
@@ -561,7 +769,7 @@ function AptitudeTest() {
     const sourceCode = answers[currentIndex] || "";
     if (!currentQuestion || !sourceCode.trim()) return;
     if (selectedRuntime?.available === false) {
-      setCodingError(`${selectedRuntime.label} is shown in the selector, but it is not installed on the backend machine yet.`);
+      setCodingError(`${selectedRuntime.label} will be coming soon.`);
       setCodingRunResults((current) => {
         const next = [...current];
         next[currentIndex] = null;
@@ -569,7 +777,7 @@ function AptitudeTest() {
       });
       return;
     }
-    setCodingLoading(true);
+    setCodingRunLoading(true);
     setCodingError("");
     try {
       const response = await axios.post(`${API_BASE_URL}/coding/run`, {
@@ -582,6 +790,11 @@ function AptitudeTest() {
         next[currentIndex] = response.data;
         return next;
       });
+      setCodingRunSources((current) => {
+        const next = [...current];
+        next[currentIndex] = sourceCode;
+        return next;
+      });
     } catch (error) {
       setCodingError(error?.response?.data?.detail || "Failed to run code.");
       setCodingRunResults((current) => {
@@ -589,8 +802,13 @@ function AptitudeTest() {
         next[currentIndex] = null;
         return next;
       });
+      setCodingRunSources((current) => {
+        const next = [...current];
+        next[currentIndex] = "";
+        return next;
+      });
     } finally {
-      setCodingLoading(false);
+      setCodingRunLoading(false);
     }
   }
 
@@ -598,7 +816,7 @@ function AptitudeTest() {
     const sourceCode = answers[currentIndex] || "";
     if (!currentQuestion || !sourceCode.trim()) return;
     if (selectedRuntime?.available === false) {
-      setCodingError(`${selectedRuntime.label} is shown in the selector, but it is not installed on the backend machine yet.`);
+      setCodingError(`${selectedRuntime.label} will be coming soon.`);
       setCodingSubmitResults((current) => {
         const next = [...current];
         next[currentIndex] = null;
@@ -606,13 +824,18 @@ function AptitudeTest() {
       });
       return;
     }
-    setCodingLoading(true);
+    setCodingSubmitLoading(true);
     setCodingError("");
     try {
+      const cachedPublicExecution = codingRunSources[currentIndex] === sourceCode && codingRunResults[currentIndex]?.status === "ok"
+        ? codingRunResults[currentIndex]
+        : null;
       const response = await axios.post(`${API_BASE_URL}/coding/submit`, {
         language: codingLanguage,
         source_code: sourceCode,
         challenge: currentQuestion,
+        fast_feedback: true,
+        cached_public_execution: cachedPublicExecution,
       });
       setCodingSubmitResults((current) => {
         const next = [...current];
@@ -629,7 +852,7 @@ function AptitudeTest() {
     } catch (error) {
       setCodingError(error?.response?.data?.detail || "Failed to submit solution.");
     } finally {
-      setCodingLoading(false);
+      setCodingSubmitLoading(false);
     }
   }
 
@@ -918,7 +1141,7 @@ function AptitudeTest() {
                           setCodingLanguage(nextLanguage);
                           setAnswers((currentAnswers) => {
                             const nextAnswers = [...currentAnswers];
-                            nextAnswers[currentIndex] = getStarterCode(currentQuestion, nextLanguage);
+                            nextAnswers[currentIndex] = nextLanguage ? getStarterCode(currentQuestion, nextLanguage) : "";
                             return nextAnswers;
                           });
                           setCodingRunResults((current) => {
@@ -934,9 +1157,10 @@ function AptitudeTest() {
                           setCodingError("");
                         }}
                       >
+                        <option value="">Select language</option>
                         {runtimeLanguages.map((language) => (
                           <option key={language.id} value={language.id}>
-                            {language.available === false ? `${language.label} (Unavailable)` : language.label}
+                            {language.available === false ? `${language.label} (Coming soon)` : language.label}
                           </option>
                         ))}
                       </select>
@@ -944,25 +1168,52 @@ function AptitudeTest() {
 
                     {selectedRuntime?.available === false ? (
                       <div className="aptitude-code-error">
-                        {selectedRuntime.label} is shown in the selector, but it is not installed on the backend machine yet.
+                        {selectedRuntime.label} will be coming soon.
                       </div>
                     ) : null}
 
                     <label className="aptitude-code-answer" htmlFor="coding-response">
                       <span>Code Editor</span>
-                      <textarea
-                        id="coding-response"
-                        value={answers[currentIndex] || ""}
-                        onChange={(event) => handleSelectAnswer(event.target.value)}
-                        placeholder={`Complete the main logic in ${selectedRuntime?.label || "your selected language"}...`}
-                        className="aptitude-code-editor"
-                      />
+                      {hasSelectedCodingLanguage ? (
+                        <textarea
+                          id="coding-response"
+                          value={answers[currentIndex] || ""}
+                          onChange={(event) => handleSelectAnswer(event.target.value)}
+                          placeholder={`Complete the main logic in ${selectedRuntime?.label || "your selected language"}...`}
+                          className="aptitude-code-editor"
+                        />
+                      ) : (
+                        <div
+                          className="aptitude-code-editor"
+                          style={{
+                            background: "#0f172a",
+                            color: "#e2e8f0",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            textAlign: "center",
+                            padding: "32px",
+                            whiteSpace: "pre-line",
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontSize: "1.35rem", fontWeight: 800, marginBottom: "10px", color: "#f8fafc" }}>
+                              Start your coding journey
+                            </div>
+                            <div style={{ color: "#94a3b8", lineHeight: 1.7 }}>
+                              Choose a language to load the starter template,
+                              then begin solving the challenge with confidence.
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </label>
 
                     <div className="aptitude-flow-actions aptitude-coding-actions">
                       <button
                         type="button"
                         className="small-start-btn aptitude-secondary-btn"
+                        disabled={isCodingBusy || !hasSelectedCodingLanguage}
                         onClick={() => {
                           setAnswers((currentAnswers) => {
                             const nextAnswers = [...currentAnswers];
@@ -984,11 +1235,11 @@ function AptitudeTest() {
                       >
                         Reset Template
                       </button>
-                      <button type="button" className="small-start-btn aptitude-secondary-btn" onClick={handleRunCode} disabled={codingLoading || !(answers[currentIndex] || "").trim() || selectedRuntime?.available === false}>
-                        Run Code
+                      <button type="button" className="small-start-btn aptitude-secondary-btn" onClick={handleRunCode} disabled={isCodingBusy || !hasSelectedCodingLanguage || !(answers[currentIndex] || "").trim() || selectedRuntime?.available === false}>
+                        {codingRunLoading ? "Running..." : "Run Code"}
                       </button>
-                      <button type="button" className="mock-btn aptitude-primary-btn" onClick={() => handleSubmitCode("manual")} disabled={codingLoading || !(answers[currentIndex] || "").trim() || selectedRuntime?.available === false}>
-                        Submit Solution
+                      <button type="button" className="mock-btn aptitude-primary-btn" onClick={() => handleSubmitCode("manual")} disabled={isCodingBusy || !hasSelectedCodingLanguage || !(answers[currentIndex] || "").trim() || selectedRuntime?.available === false}>
+                        {codingSubmitLoading ? "Submitting..." : "Submit Solution"}
                       </button>
                     </div>
 

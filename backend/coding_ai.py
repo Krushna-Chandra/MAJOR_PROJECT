@@ -9,6 +9,10 @@ from typing import Any, Dict, List, Optional
 from interview_ai import ProviderError, _generate_json_with_fallback, _normalize_text, _safe_list
 
 
+RECENT_CHALLENGE_HISTORY_PATH = os.path.join(os.path.dirname(__file__), "coding_question_history.json")
+RECENT_CHALLENGE_HISTORY_LIMIT = 200
+
+
 LANGUAGE_CATALOG: Dict[str, Dict[str, Any]] = {
     "javascript": {
         "label": "JavaScript (Node.js)",
@@ -328,7 +332,51 @@ def _pick_fallback_challenge(difficulty: str) -> Dict[str, Any]:
 def _challenge_key(challenge: Dict[str, Any]) -> str:
     title = _normalize_text(str(challenge.get("title") or "")).lower()
     description = _normalize_text(str(challenge.get("description") or "")).lower()
-    return f"{title}::{description}"
+    return title or description
+
+
+def _load_recent_challenge_history() -> Dict[str, List[str]]:
+    try:
+        with open(RECENT_CHALLENGE_HISTORY_PATH, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+    if not isinstance(payload, dict):
+        return {}
+
+    cleaned: Dict[str, List[str]] = {}
+    for difficulty, items in payload.items():
+        if isinstance(items, list):
+            cleaned[str(difficulty)] = [str(item).strip().lower() for item in items if str(item).strip()]
+    return cleaned
+
+
+def _save_recent_challenge_history(history: Dict[str, List[str]]) -> None:
+    try:
+        with open(RECENT_CHALLENGE_HISTORY_PATH, "w", encoding="utf-8") as handle:
+            json.dump(history, handle, ensure_ascii=False, indent=2)
+    except OSError:
+        return
+
+
+def _recent_challenge_keys(difficulty: str) -> List[str]:
+    history = _load_recent_challenge_history()
+    normalized_difficulty = str(difficulty or "easy").lower()
+    return history.get(normalized_difficulty, [])
+
+
+def _remember_recent_challenge(difficulty: str, challenge: Dict[str, Any]) -> None:
+    key = _challenge_key(challenge)
+    if not key:
+        return
+
+    normalized_difficulty = str(difficulty or "easy").lower()
+    history = _load_recent_challenge_history()
+    items = [item for item in history.get(normalized_difficulty, []) if item != key]
+    items.append(key)
+    history[normalized_difficulty] = items[-RECENT_CHALLENGE_HISTORY_LIMIT:]
+    _save_recent_challenge_history(history)
 
 
 FALLBACK_VARIANTS: Dict[str, List[Dict[str, Any]]] = {
@@ -758,10 +806,12 @@ async def generate_coding_challenge(difficulty: str = "easy", excluded_questions
         normalized_difficulty = "medium"
     else:
         normalized_difficulty = "easy"
+    recent_keys = _recent_challenge_keys(normalized_difficulty)
     exclusions = [item.strip() for item in (excluded_questions or []) if str(item).strip()]
+    exclusions.extend(recent_keys)
     exclusion_block = ""
     if exclusions:
-        exclusion_block = f"\n- Do not generate a problem that matches or closely resembles any of these prior questions/titles/descriptions: {json.dumps(exclusions[:50], ensure_ascii=False)}.\n"
+        exclusion_block = f"\n- Do not generate a problem that matches or closely resembles any of these prior questions/titles/descriptions: {json.dumps(exclusions[:200], ensure_ascii=False)}.\n"
 
     excluded_keys = {item.strip().lower() for item in exclusions if item.strip()}
     base_prompt = f"""
@@ -813,14 +863,17 @@ Rules:
             )
             normalized = _normalize_challenge(challenge, normalized_difficulty)
             if _challenge_key(normalized) not in excluded_keys:
+                _remember_recent_challenge(normalized_difficulty, normalized)
                 return normalized
         except ProviderError:
             continue
 
-    return _normalize_challenge(
+    fallback = _normalize_challenge(
         _pick_unique_fallback_challenge(normalized_difficulty, list(excluded_keys)),
         normalized_difficulty,
     )
+    _remember_recent_challenge(normalized_difficulty, fallback)
+    return fallback
 
 
 def _run_process(command: List[str], cwd: str, stdin_text: str = "", timeout_seconds: int = 6) -> subprocess.CompletedProcess:
@@ -908,12 +961,43 @@ def run_code_against_tests(language: str, source_code: str, test_cases: List[Dic
         }
 
 
+def merge_execution_results(public_execution: Dict[str, Any], hidden_execution: Dict[str, Any]) -> Dict[str, Any]:
+    public_results = list(public_execution.get("results") or [])
+    hidden_results = list(hidden_execution.get("results") or [])
+    offset = len(public_results)
+
+    normalized_hidden_results = []
+    for index, item in enumerate(hidden_results, start=1):
+        normalized_hidden_results.append({
+            **item,
+            "index": offset + index,
+        })
+
+    merged_results = public_results + normalized_hidden_results
+    passed = int(public_execution.get("passed", 0) or 0) + int(hidden_execution.get("passed", 0) or 0)
+    total = int(public_execution.get("total", 0) or 0) + int(hidden_execution.get("total", 0) or 0)
+    status = "compile_error" if "compile_error" in {public_execution.get("status"), hidden_execution.get("status")} else "ok"
+
+    response = {
+        "status": status,
+        "passed": passed,
+        "total": total,
+        "results": merged_results,
+    }
+
+    compile_output = public_execution.get("compile_output") or hidden_execution.get("compile_output")
+    if compile_output:
+        response["compile_output"] = compile_output
+    return response
+
+
 async def evaluate_coding_submission(
     challenge: Dict[str, Any],
     language: str,
     source_code: str,
     execution_summary: Dict[str, Any],
 ) -> Dict[str, Any]:
+    fallback = build_fallback_coding_review(execution_summary)
     prompt = f"""
 You are reviewing a coding interview submission.
 
@@ -937,7 +1021,26 @@ Return valid JSON:
   "next_steps": ["up to 3 improvements"]
 }}
 """
-    fallback = {
+    try:
+        review, _provider = await _generate_json_with_fallback(
+            prompt,
+            ["gemini", "ollama"],
+            0.2,
+            20,
+        )
+        return {
+            "summary": _normalize_text(review.get("summary") or fallback["summary"]),
+            "strengths": _safe_list(review.get("strengths"))[:3] or fallback["strengths"],
+            "issues": _safe_list(review.get("issues"))[:3] or fallback["issues"],
+            "complexity": _normalize_text(review.get("complexity") or fallback["complexity"]),
+            "next_steps": _safe_list(review.get("next_steps"))[:3] or fallback["next_steps"],
+        }
+    except ProviderError:
+        return fallback
+
+
+def build_fallback_coding_review(execution_summary: Dict[str, Any]) -> Dict[str, Any]:
+    return {
         "summary": (
             "The submission was evaluated against the platform test cases. "
             f"It passed {execution_summary.get('passed', 0)} out of {execution_summary.get('total', 0)} tests."
@@ -957,22 +1060,6 @@ Return valid JSON:
             "Refactor for readability if needed.",
         ],
     }
-    try:
-        review, _provider = await _generate_json_with_fallback(
-            prompt,
-            ["gemini", "ollama"],
-            0.2,
-            20,
-        )
-        return {
-            "summary": _normalize_text(review.get("summary") or fallback["summary"]),
-            "strengths": _safe_list(review.get("strengths"))[:3] or fallback["strengths"],
-            "issues": _safe_list(review.get("issues"))[:3] or fallback["issues"],
-            "complexity": _normalize_text(review.get("complexity") or fallback["complexity"]),
-            "next_steps": _safe_list(review.get("next_steps"))[:3] or fallback["next_steps"],
-        }
-    except ProviderError:
-        return fallback
 
 
 def get_coding_runtime_status() -> Dict[str, Any]:

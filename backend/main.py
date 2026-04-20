@@ -35,9 +35,11 @@ from auth_utils import (
     ALGORITHM
 )
 from coding_ai import (
+    build_fallback_coding_review,
     evaluate_coding_submission,
     generate_coding_challenge,
     get_coding_runtime_status,
+    merge_execution_results,
     run_code_against_tests,
 )
 from interview_ai import (
@@ -4082,9 +4084,23 @@ async def submit_coding_solution(payload: dict = Body(...)):
         language = (payload.get("language") or "").strip().lower()
         source_code = payload.get("source_code") or ""
         challenge = payload.get("challenge") or {}
-        all_cases = list(challenge.get("public_test_cases") or []) + list(challenge.get("hidden_test_cases") or [])
-        execution = run_code_against_tests(language, source_code, all_cases)
-        review = await evaluate_coding_submission(challenge, language, source_code, execution)
+        fast_feedback = payload.get("fast_feedback", True)
+        public_cases = list(challenge.get("public_test_cases") or [])
+        hidden_cases = list(challenge.get("hidden_test_cases") or [])
+        cached_public_execution = payload.get("cached_public_execution") if isinstance(payload.get("cached_public_execution"), dict) else None
+
+        if cached_public_execution and hidden_cases:
+            hidden_execution = run_code_against_tests(language, source_code, hidden_cases)
+            execution = merge_execution_results(cached_public_execution, hidden_execution)
+        elif cached_public_execution:
+            execution = cached_public_execution
+        else:
+            execution = run_code_against_tests(language, source_code, public_cases + hidden_cases)
+        review = (
+            build_fallback_coding_review(execution)
+            if fast_feedback
+            else await evaluate_coding_submission(challenge, language, source_code, execution)
+        )
         return {
             "execution": execution,
             "review": review,
