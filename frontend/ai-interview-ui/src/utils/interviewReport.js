@@ -178,7 +178,11 @@ export const getStoredUser = () => {
 
 export const normalizeReport = (report, fallbackContext = {}, fallbackUser = null) => {
   const storedUser = fallbackUser || getStoredUser();
-  const context = report?.context && typeof report.context === "object" ? report.context : fallbackContext || {};
+  const context = {
+    ...(fallbackContext || {}),
+    ...(report || {}),
+    ...((report?.context && typeof report.context === "object") ? report.context : {}),
+  };
   const user = report?.user && typeof report.user === "object" ? report.user : storedUser;
   const evaluations = Array.isArray(report?.evaluations) ? report.evaluations.map((item) => normalizeEvaluation(item)) : [];
   const providerFromEvaluations = evaluations

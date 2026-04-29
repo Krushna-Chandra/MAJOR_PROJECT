@@ -1,11 +1,41 @@
 {
   "easy": [
-    "reverse each word",
-    "count even numbers in a list",
     "count positive numbers",
+    "cyclic alphabet shift",
+    "count words with prefix",
+    "sum of digits of smallest number",
+    "all characters even frequency",
+    "sum of common multiples",
+    "largest digit in a number",
+    "count elements greater than average",
+    "sum of multiples up to n",
+    "sum of alternating elements",
+    "reverse each word",
+    "second largest number",
     "count vowels in a string",
     "count words with vowels",
-    "largest digit in a number",
-    "second largest number"
+    "count even numbers in a list",
+    "sum of digits"
+  ],
+  "hard": [
+    "trapping rain water",
+    "sliding window maximum",
+    "largest rectangle in histogram",
+    "median of running stream",
+    "word ladder steps",
+    "longest unique substring length",
+    "alien dictionary order",
+    "minimum window substring length"
+  ],
+  "medium": [
+    "validate bracket sequence",
+    "group anagrams",
+    "product of array except self",
+    "maximize points by deleting numbers",
+    "merge overlapping intervals",
+    "longest consecutive run",
+    "longest subarray with sum k",
+    "spiral order of matrix",
+    "top k frequent numbers"
   ]
 }

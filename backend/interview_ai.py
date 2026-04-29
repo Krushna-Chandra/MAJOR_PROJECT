@@ -921,6 +921,675 @@ def get_ai_provider_status() -> Dict[str, Any]:
     }
 
 
+COMPUTER_FUNDAMENTALS_TOPICS = [
+    "DBMS",
+    "Computer Networks",
+    "Operating Systems",
+    "Programming Concepts",
+    "Data Structures",
+    "Computer Fundamentals",
+    "OOP (Object-Oriented Programming)",
+    "Software Engineering",
+    "Basics of Algorithms",
+]
+
+
+APTITUDE_TOPICS = [
+    "Clocks & Calendar",
+    "Series and Progressions",
+    "Equations",
+    "Averages",
+    "Area, Shapes & Perimeter",
+    "Numbers & Decimal Fractions",
+    "Number System",
+    "LCM & HCF",
+    "Percentages",
+    "Allegations and Mixtures",
+    "Probability",
+    "Ratios",
+    "Proportion",
+    "Work and Time",
+    "Geometry",
+    "Divisibility",
+    "Profit and Loss",
+    "Ages",
+    "Speed Distance and Time",
+    "Pie Charts",
+    "Mean, Median, Mode, Variance and Standard Deviation",
+]
+
+
+REASONING_TOPICS = [
+    "Blood Relations",
+    "Seating Arrangement",
+    "Coding-Decoding",
+    "Data Sufficiency",
+    "Data Arrangements",
+    "Distance and Directions",
+    "Statement and Conclusion",
+    "Data Interpretation",
+    "Syllogism",
+    "Word Pattern",
+    "Letter Series",
+    "Number Series",
+    "Directional Sense",
+    "Figure-Based Reasoning",
+    "Cube Folding, Paper Cuts and Folds",
+]
+
+
+VERBAL_TOPICS = [
+    "Sentence Completion",
+    "Words Completion",
+    "Reading Comprehension",
+    "Para jumbles",
+    "Error Detection",
+    "Sentence Building",
+    "Idioms & Phrases",
+]
+
+
+ADVANCED_QUANT_TOPICS = [
+    "HCF & LCM and Number System",
+    "Geometry",
+    "Ages",
+    "Allegations and Mixtures",
+    "Averages",
+    "Clocks and Calendars",
+    "Equations",
+    "Percentages",
+    "Permutations and Combinations",
+    "Probability",
+    "Profit and Loss",
+    "Ratios and Proportion",
+    "Series and Progressions",
+    "Time, Speed and Distance",
+    "Time and Work",
+    "Mean, Median, Mode, Standard Deviation, and Variance",
+    "Data Interpretation",
+    "Graphical Data Interpretation",
+    "Pie Charts",
+    "Tabular Data Interpretation",
+    "Simple Arithmetic Operations",
+]
+
+
+APTITUDE_FALLBACK_QUESTIONS: List[Dict[str, Any]] = [
+    {"question": "What is 15% of 240?", "options": ["24", "30", "36", "42"], "answer": "36", "topic": "Percentages"},
+    {"question": "If 25% of a number is 75, the number is:", "options": ["250", "275", "300", "325"], "answer": "300", "topic": "Percentages"},
+    {"question": "The average of 12, 18, 20, and 30 is:", "options": ["18", "20", "22", "24"], "answer": "20", "topic": "Averages"},
+    {"question": "The mean of 5, 7, 9, 11, and 13 is:", "options": ["8", "9", "10", "11"], "answer": "9", "topic": "Mean, Median, Mode, Variance and Standard Deviation"},
+    {"question": "A train travels 180 km in 3 hours. What is its speed?", "options": ["50 km/h", "55 km/h", "60 km/h", "65 km/h"], "answer": "60 km/h", "topic": "Speed Distance and Time"},
+    {"question": "If a worker completes a job in 10 days, what fraction of the work is done in 1 day?", "options": ["1/5", "1/10", "1/12", "1/15"], "answer": "1/10", "topic": "Work and Time"},
+    {"question": "What is the area of a rectangle with length 15 cm and breadth 8 cm?", "options": ["100", "110", "120", "130"], "answer": "120", "topic": "Area, Shapes & Perimeter"},
+    {"question": "The perimeter of a square is 36 cm. What is the side length?", "options": ["6 cm", "8 cm", "9 cm", "12 cm"], "answer": "9 cm", "topic": "Area, Shapes & Perimeter"},
+    {"question": "Which of the following numbers is divisible by 3?", "options": ["124", "153", "172", "190"], "answer": "153", "topic": "Divisibility"},
+    {"question": "What is the HCF of 18 and 24?", "options": ["3", "6", "9", "12"], "answer": "6", "topic": "LCM & HCF"},
+    {"question": "What is the LCM of 6 and 8?", "options": ["12", "24", "36", "48"], "answer": "24", "topic": "LCM & HCF"},
+    {"question": "What is 3/4 of 84?", "options": ["56", "60", "63", "66"], "answer": "63", "topic": "Numbers & Decimal Fractions"},
+    {"question": "0.75 is equal to:", "options": ["3/2", "3/4", "4/3", "7/5"], "answer": "3/4", "topic": "Numbers & Decimal Fractions"},
+    {"question": "Which of the following is a prime number?", "options": ["21", "29", "33", "39"], "answer": "29", "topic": "Number System"},
+    {"question": "If the ratio of boys to girls is 3:2 and there are 30 boys, how many girls are there?", "options": ["18", "20", "22", "24"], "answer": "20", "topic": "Ratios"},
+    {"question": "If x : y = 4 : 5 and x = 20, then y = ?", "options": ["22", "24", "25", "28"], "answer": "25", "topic": "Proportion"},
+    {"question": "A shopkeeper gains 20% on an item sold for Rs. 240. What was the cost price?", "options": ["Rs. 180", "Rs. 190", "Rs. 200", "Rs. 210"], "answer": "Rs. 200", "topic": "Profit and Loss"},
+    {"question": "A and B can complete a work in 6 days together. If A alone can do it in 10 days, how many days will B alone take?", "options": ["12", "15", "18", "20"], "answer": "15", "topic": "Work and Time"},
+    {"question": "The sum of present ages of a father and son is 50. If the father is 20 years older, what is the son's age?", "options": ["10", "15", "20", "25"], "answer": "15", "topic": "Ages"},
+    {"question": "In a pie chart, a sector of 90 degrees represents what fraction of the whole?", "options": ["1/2", "1/3", "1/4", "1/5"], "answer": "1/4", "topic": "Pie Charts"},
+    {"question": "A bag contains 3 red and 2 blue balls. What is the probability of drawing a red ball?", "options": ["1/5", "2/5", "3/5", "4/5"], "answer": "3/5", "topic": "Probability"},
+    {"question": "In the mixture 2 liters milk and 3 liters water, the ratio of milk to water is:", "options": ["2:3", "3:2", "5:2", "2:5"], "answer": "2:3", "topic": "Allegations and Mixtures"},
+    {"question": "What comes next in the series 2, 4, 8, 16, ?", "options": ["24", "30", "32", "36"], "answer": "32", "topic": "Series and Progressions"},
+    {"question": "Solve: 2x + 5 = 17", "options": ["4", "5", "6", "7"], "answer": "6", "topic": "Equations"},
+    {"question": "How many odd days are there in 2 ordinary years?", "options": ["0", "1", "2", "3"], "answer": "2", "topic": "Clocks & Calendar"},
+    {"question": "The sum of angles in a triangle is:", "options": ["90 degrees", "120 degrees", "180 degrees", "360 degrees"], "answer": "180 degrees", "topic": "Geometry"},
+]
+
+
+REASONING_FALLBACK_QUESTIONS: List[Dict[str, Any]] = [
+    {"question": "Pointing to a man, Riya says, 'He is the son of my mother's brother.' How is the man related to Riya?", "options": ["Brother", "Cousin", "Uncle", "Nephew"], "answer": "Cousin", "topic": "Blood Relations"},
+    {"question": "Five people sit in a row. A is to the left of B, and C is to the right of B. Who sits in the middle among A, B, and C?", "options": ["A", "B", "C", "Cannot be determined"], "answer": "B", "topic": "Seating Arrangement"},
+    {"question": "If CAT is coded as DBU, then DOG is coded as:", "options": ["EPH", "EPG", "DOH", "FPH"], "answer": "EPH", "topic": "Coding-Decoding"},
+    {"question": "Statement: All pens are books. Some books are bags. Conclusion: Some pens are bags. Choose the correct option.", "options": ["Conclusion definitely follows", "Conclusion does not follow", "Conclusion may follow", "Both statement and conclusion are false"], "answer": "Conclusion does not follow", "topic": "Syllogism"},
+    {"question": "Which number comes next in the series 2, 5, 10, 17, 26, ?", "options": ["35", "36", "37", "38"], "answer": "37", "topic": "Number Series"},
+    {"question": "Which letter comes next in the series A, C, F, J, ?", "options": ["M", "N", "O", "P"], "answer": "O", "topic": "Letter Series"},
+    {"question": "If SOUTH is written as HTUOS, then which of the following is a similar word pattern for TRAIN?", "options": ["NIART", "TRAINI", "TARIN", "RAINT"], "answer": "NIART", "topic": "Word Pattern"},
+    {"question": "A person walks 5 km north and then 3 km east. In which direction is the person from the starting point?", "options": ["North-East", "South-East", "North-West", "West"], "answer": "North-East", "topic": "Distance and Directions"},
+    {"question": "A person walks 10 m south, then 10 m west. Which direction is the final position from the start?", "options": ["South-East", "South-West", "North-West", "North-East"], "answer": "South-West", "topic": "Directional Sense"},
+    {"question": "Statement: All students should revise daily. Conclusion: Revision helps students prepare better. Choose the best option.", "options": ["Conclusion follows", "Conclusion does not follow", "Both are unrelated", "Statement is false"], "answer": "Conclusion follows", "topic": "Statement and Conclusion"},
+    {"question": "A table shows sales of 10, 20, 30, and 40 units in four months. What is the average monthly sales?", "options": ["20", "25", "30", "35"], "answer": "25", "topic": "Data Interpretation"},
+    {"question": "Question: Is x greater than y? Statements: 1. x = 12  2. y = 10. Choose the correct option.", "options": ["Statement 1 alone is sufficient", "Statement 2 alone is sufficient", "Both together are sufficient", "Data insufficient"], "answer": "Both together are sufficient", "topic": "Data Sufficiency"},
+    {"question": "In a line arrangement, P is between Q and R. If Q is at one end, where is R?", "options": ["At the other end", "In the middle", "Next to Q", "Cannot be determined"], "answer": "At the other end", "topic": "Data Arrangements"},
+    {"question": "A figure sequence shows: 1 triangle, then 2 triangles, then 3 triangles. If the pattern continues, how many triangles will be in the 6th figure?", "options": ["5", "6", "7", "8"], "answer": "6", "topic": "Figure-Based Reasoning"},
+    {"question": "A square is rotated 90 degrees clockwise in each step. If it starts with a dot at the top-left corner, where will the dot be after 2 rotations?", "options": ["Top-right", "Bottom-right", "Bottom-left", "Top-left"], "answer": "Bottom-right", "topic": "Figure-Based Reasoning"},
+    {"question": "In a shape pattern, the number of sides goes 3, 4, 5, 6. Which shape should come next?", "options": ["Triangle", "Hexagon", "Heptagon", "Octagon"], "answer": "Heptagon", "topic": "Figure-Based Reasoning"},
+    {"question": "A paper is folded once and a hole is punched near the folded edge. After unfolding, how many holes will appear?", "options": ["1", "2", "3", "4"], "answer": "2", "topic": "Figure-Based Reasoning"},
+    {"question": "A cube has all faces painted. If it is cut into 27 smaller equal cubes, how many small cubes will have paint on exactly 2 faces?", "options": ["8", "12", "6", "24"], "answer": "12", "topic": "Cube Folding, Paper Cuts and Folds"},
+]
+
+
+VERBAL_FALLBACK_QUESTIONS: List[Dict[str, Any]] = [
+    {"question": "Choose the correct word to complete the sentence: She was tired, ____ she finished the work.", "options": ["but", "yet", "although", "because"], "answer": "yet", "topic": "Sentence Completion"},
+    {"question": "Fill in the blank: The manager asked the team to work with great ____.", "options": ["diligence", "diligent", "diligently", "dilute"], "answer": "diligence", "topic": "Words Completion"},
+    {"question": "Read the sentence and find the error: 'He do not like coffee.'", "options": ["He", "do", "not", "coffee"], "answer": "do", "topic": "Error Detection"},
+    {"question": "Choose the correctly arranged sentence: 1. to 2. school 3. every day 4. She goes", "options": ["She school goes to every day", "She goes to school every day", "To school she every day goes", "Every day school she goes to"], "answer": "She goes to school every day", "topic": "Sentence Building"},
+    {"question": "Choose the correct meaning of the idiom 'break the ice'.", "options": ["To crack frozen water", "To start a conversation comfortably", "To stop talking", "To become angry"], "answer": "To start a conversation comfortably", "topic": "Idioms & Phrases"},
+    {"question": "Arrange the following into a meaningful paragraph order: P: It started raining heavily. Q: We opened our umbrellas. R: Dark clouds gathered. S: We hurried home.", "options": ["R, P, Q, S", "P, R, Q, S", "Q, R, P, S", "R, Q, P, S"], "answer": "R, P, Q, S", "topic": "Para jumbles"},
+    {"question": "Choose the best word to complete the sentence: The new policy will ____ better communication between teams.", "options": ["foster", "fostersly", "fostering", "fostered"], "answer": "foster", "topic": "Words Completion"},
+    {"question": "Sentence Completion: If you study regularly, you ____ improve your vocabulary.", "options": ["will", "would", "shall be", "had"], "answer": "will", "topic": "Sentence Completion"},
+    {"question": "Read the passage: 'Mina reads every day. She enjoys stories about science and discovery.' What does Mina like to read about?", "options": ["History", "Sports", "Science and discovery", "Travel only"], "answer": "Science and discovery", "topic": "Reading Comprehension"},
+    {"question": "Find the error: 'Neither of the boys were present.'", "options": ["Neither", "boys", "were", "present"], "answer": "were", "topic": "Error Detection"},
+    {"question": "Choose the correct meaning of the idiom 'once in a blue moon'.", "options": ["Very often", "Very rarely", "At night", "Without warning"], "answer": "Very rarely", "topic": "Idioms & Phrases"},
+    {"question": "Arrange the words into a meaningful sentence: 1. honesty 2. the best policy 3. is 4.", "options": ["Honesty is the best policy", "The best honesty is policy", "Policy is honesty the best", "Is honesty best the policy"], "answer": "Honesty is the best policy", "topic": "Sentence Building"},
+    {"question": "Choose the best completion: The speaker paused for a moment ____ continuing the lecture.", "options": ["before", "after", "during", "through"], "answer": "before", "topic": "Sentence Completion"},
+    {"question": "Read the passage: 'The library was silent, so everyone spoke softly.' Why did everyone speak softly?", "options": ["They were afraid", "The library was silent", "They were outside", "They were singing"], "answer": "The library was silent", "topic": "Reading Comprehension"},
+]
+
+
+ADVANCED_QUANT_FALLBACK_QUESTIONS: List[Dict[str, Any]] = [
+    {"question": "Find the HCF of 84, 126, and 210.", "options": ["14", "21", "28", "42"], "answer": "42", "topic": "HCF & LCM and Number System"},
+    {"question": "The LCM of 18, 24, and 30 is:", "options": ["120", "180", "240", "360"], "answer": "360", "topic": "HCF & LCM and Number System"},
+    {"question": "The radius of a circle is increased by 20%. By what percent does the area increase?", "options": ["20%", "36%", "40%", "44%"], "answer": "44%", "topic": "Geometry"},
+    {"question": "Ten years ago, the ratio of ages of A and B was 3:2. Ten years from now it will be 5:4. What is A's present age?", "options": ["30", "35", "40", "45"], "answer": "40", "topic": "Ages"},
+    {"question": "In what ratio should water be mixed with milk costing Rs. 30 per liter so that the mixture sold at Rs. 24 per liter gives no profit and no loss?", "options": ["1:4", "1:5", "2:5", "3:7"], "answer": "1:4", "topic": "Allegations and Mixtures"},
+    {"question": "The average of 15 numbers is 24. If one number is excluded, the average becomes 23. What is the excluded number?", "options": ["32", "36", "38", "40"], "answer": "38", "topic": "Averages"},
+    {"question": "If 15th August 2021 was a Sunday, what day was 15th August 2022?", "options": ["Sunday", "Monday", "Tuesday", "Wednesday"], "answer": "Monday", "topic": "Clocks and Calendars"},
+    {"question": "Solve for x: 3x + 5 = 2x + 17", "options": ["10", "11", "12", "13"], "answer": "12", "topic": "Equations"},
+    {"question": "A number is increased by 25% and then decreased by 20%. The net change is:", "options": ["0%", "4% increase", "5% increase", "5% decrease"], "answer": "0%", "topic": "Percentages"},
+    {"question": "How many different 4-letter arrangements can be made from the letters of the word MATH if repetition is not allowed?", "options": ["12", "18", "24", "36"], "answer": "24", "topic": "Permutations and Combinations"},
+    {"question": "Two dice are thrown together. What is the probability of getting a sum of 9?", "options": ["1/6", "1/8", "1/9", "1/12"], "answer": "1/9", "topic": "Probability"},
+    {"question": "A trader marks his goods 25% above cost price and allows a discount of 10%. His profit percent is:", "options": ["10%", "12.5%", "15%", "20%"], "answer": "12.5%", "topic": "Profit and Loss"},
+    {"question": "If x : y = 7 : 9 and y : z = 3 : 5, then x : y : z is:", "options": ["7:9:15", "7:3:5", "21:27:45", "14:18:15"], "answer": "21:27:45", "topic": "Ratios and Proportion"},
+    {"question": "Find the next term in the series: 3, 8, 15, 24, 35, ?", "options": ["44", "46", "48", "50"], "answer": "48", "topic": "Series and Progressions"},
+    {"question": "A car covers 360 km in 4.5 hours. What is its average speed?", "options": ["72 km/h", "76 km/h", "80 km/h", "84 km/h"], "answer": "80 km/h", "topic": "Time, Speed and Distance"},
+    {"question": "A can do a piece of work in 12 days and B in 18 days. In how many days can they finish it together?", "options": ["6.2", "7.2", "7.5", "8"], "answer": "7.2", "topic": "Time and Work"},
+    {"question": "The mean of five observations is 18. If four observations are 12, 16, 20, and 24, the fifth observation is:", "options": ["14", "16", "18", "20"], "answer": "18", "topic": "Mean, Median, Mode, Standard Deviation, and Variance"},
+    {"question": "If the median of 3, 5, 7, x, 11 is 7, which of the following can be x?", "options": ["1", "6", "7", "13"], "answer": "6", "topic": "Mean, Median, Mode, Standard Deviation, and Variance"},
+    {"question": "Sales in four quarters are 120, 150, 180, and 210 units. What is the percentage increase from the first to the last quarter?", "options": ["60%", "65%", "70%", "75%"], "answer": "75%", "topic": "Data Interpretation"},
+    {"question": "A line graph shows values rising from 40 to 70. What is the percentage increase?", "options": ["60%", "65%", "75%", "80%"], "answer": "75%", "topic": "Graphical Data Interpretation"},
+    {"question": "In a pie chart, if a sector measures 72 degrees, what percent of the total does it represent?", "options": ["18%", "20%", "22%", "25%"], "answer": "20%", "topic": "Pie Charts"},
+    {"question": "A table shows monthly profits of Rs. 20k, 25k, 30k, and 35k. What is the average monthly profit?", "options": ["Rs. 25k", "Rs. 27.5k", "Rs. 28k", "Rs. 30k"], "answer": "Rs. 27.5k", "topic": "Tabular Data Interpretation"},
+    {"question": "Evaluate: 18 + 6 x 3 - 12 / 4", "options": ["32", "33", "34", "35"], "answer": "33", "topic": "Simple Arithmetic Operations"},
+]
+
+
+COMPUTER_FUNDAMENTALS_FALLBACK_QUESTIONS: List[Dict[str, Any]] = [
+    {"question": "Which SQL command is used to retrieve data from a database?", "options": ["GET", "SELECT", "OPEN", "FETCHROW"], "answer": "SELECT", "topic": "DBMS"},
+    {"question": "Which normal form removes partial dependency in a relation?", "options": ["1NF", "2NF", "3NF", "BCNF"], "answer": "2NF", "topic": "DBMS"},
+    {"question": "Which SQL clause is used to filter rows after grouping?", "options": ["WHERE", "HAVING", "ORDER BY", "DISTINCT"], "answer": "HAVING", "topic": "DBMS"},
+    {"question": "Which device operates mainly at the network layer to forward packets?", "options": ["Hub", "Switch", "Router", "Repeater"], "answer": "Router", "topic": "Computer Networks"},
+    {"question": "Which protocol is commonly used to transfer web pages?", "options": ["FTP", "SMTP", "HTTP", "SNMP"], "answer": "HTTP", "topic": "Computer Networks"},
+    {"question": "Which topology connects all devices to a central hub or switch?", "options": ["Ring", "Bus", "Star", "Mesh"], "answer": "Star", "topic": "Computer Networks"},
+    {"question": "Which scheduling algorithm gives the CPU first to the process that arrives earliest?", "options": ["Round Robin", "Priority", "First Come First Serve", "Shortest Job First"], "answer": "First Come First Serve", "topic": "Operating Systems"},
+    {"question": "What is the main purpose of an operating system?", "options": ["Design websites", "Manage hardware and software resources", "Create databases only", "Compile programs only"], "answer": "Manage hardware and software resources", "topic": "Operating Systems"},
+    {"question": "Which memory stores data temporarily while a program is running?", "options": ["ROM", "RAM", "Hard Disk", "Plotter memory"], "answer": "RAM", "topic": "Operating Systems"},
+    {"question": "Which statement about a compiler is correct?", "options": ["It translates the whole program before execution", "It executes SQL queries", "It only formats code", "It stores programs permanently"], "answer": "It translates the whole program before execution", "topic": "Programming Concepts"},
+    {"question": "Which loop is guaranteed to execute at least once in many programming languages?", "options": ["for loop", "while loop", "do-while loop", "foreach loop"], "answer": "do-while loop", "topic": "Programming Concepts"},
+    {"question": "Which data type is commonly used to store true or false values?", "options": ["float", "boolean", "char", "array"], "answer": "boolean", "topic": "Programming Concepts"},
+    {"question": "Which data structure follows the Last In First Out principle?", "options": ["Queue", "Stack", "Linked List", "Tree"], "answer": "Stack", "topic": "Data Structures"},
+    {"question": "Which traversal of a Binary Search Tree returns values in sorted order?", "options": ["Preorder", "Postorder", "Inorder", "Level order"], "answer": "Inorder", "topic": "Data Structures"},
+    {"question": "Which of the following is not a linear data structure?", "options": ["Array", "Stack", "Queue", "Tree"], "answer": "Tree", "topic": "Data Structures"},
+    {"question": "CPU stands for:", "options": ["Central Process Unit", "Central Processing Unit", "Control Program Unit", "Computer Primary Unit"], "answer": "Central Processing Unit", "topic": "Computer Fundamentals"},
+    {"question": "Which number system uses only 0 and 1?", "options": ["Decimal", "Binary", "Octal", "Hexadecimal"], "answer": "Binary", "topic": "Computer Fundamentals"},
+    {"question": "Which of these is an input device?", "options": ["Monitor", "Printer", "Keyboard", "Speaker"], "answer": "Keyboard", "topic": "Computer Fundamentals"},
+    {"question": "Which OOP concept allows one class to acquire the properties of another class?", "options": ["Polymorphism", "Encapsulation", "Inheritance", "Abstraction"], "answer": "Inheritance", "topic": "OOP (Object-Oriented Programming)"},
+    {"question": "Which principle hides internal implementation details from the user?", "options": ["Inheritance", "Abstraction", "Compilation", "Recursion"], "answer": "Abstraction", "topic": "OOP (Object-Oriented Programming)"},
+    {"question": "What is meant by polymorphism in OOP?", "options": ["Storing data in private fields", "Using one interface with many forms", "Creating only one object", "Combining hardware devices"], "answer": "Using one interface with many forms", "topic": "OOP (Object-Oriented Programming)"},
+    {"question": "Which phase of the software development life cycle focuses on gathering requirements?", "options": ["Testing", "Maintenance", "Requirement Analysis", "Deployment"], "answer": "Requirement Analysis", "topic": "Software Engineering"},
+    {"question": "Which testing type checks individual functions or modules?", "options": ["System Testing", "Integration Testing", "Unit Testing", "Acceptance Testing"], "answer": "Unit Testing", "topic": "Software Engineering"},
+    {"question": "A software bug is best described as:", "options": ["A finished feature", "An error or flaw in the program", "A database backup", "A network cable"], "answer": "An error or flaw in the program", "topic": "Software Engineering"},
+    {"question": "What is the time complexity of binary search on a sorted array?", "options": ["O(n)", "O(log n)", "O(n log n)", "O(1)"], "answer": "O(log n)", "topic": "Basics of Algorithms"},
+    {"question": "Which algorithmic technique solves a problem by dividing it into smaller subproblems and combining results?", "options": ["Brute force", "Divide and conquer", "Greedy only", "Backtracking only"], "answer": "Divide and conquer", "topic": "Basics of Algorithms"},
+    {"question": "Which notation is commonly used to describe algorithm efficiency?", "options": ["SQL notation", "Big O notation", "Binary notation", "Flowchart notation"], "answer": "Big O notation", "topic": "Basics of Algorithms"},
+]
+
+
+def _normalize_mcq_option(value: Any) -> str:
+    return _normalize_text(str(value or ""))
+
+
+def _normalize_generated_mcq(raw_question: Dict[str, Any], index: int) -> Dict[str, Any]:
+    question = _normalize_text(raw_question.get("question") or raw_question.get("prompt") or raw_question.get("text") or "")
+    if not question:
+        raise ProviderError("Generated MCQ question text was empty.")
+
+    raw_options = raw_question.get("options") or raw_question.get("choices") or []
+    options: List[str] = []
+    seen_options = set()
+    for option in raw_options:
+        normalized_option = _normalize_mcq_option(option)
+        if normalized_option and normalized_option.lower() not in seen_options:
+            seen_options.add(normalized_option.lower())
+            options.append(normalized_option)
+
+    answer = _normalize_mcq_option(raw_question.get("answer") or raw_question.get("correct_answer"))
+    if answer and answer.lower() not in seen_options:
+        options.append(answer)
+        seen_options.add(answer.lower())
+
+    if len(options) != 4:
+        raise ProviderError("Generated MCQ did not contain exactly four unique options.")
+    if not answer:
+        raise ProviderError("Generated MCQ answer was empty.")
+    if answer.lower() not in {item.lower() for item in options}:
+        raise ProviderError("Generated MCQ answer was not included in options.")
+
+    topic = _normalize_text(raw_question.get("topic") or raw_question.get("category") or "Computer Fundamentals")
+    return {
+        "question": question,
+        "options": options,
+        "answer": next(item for item in options if item.lower() == answer.lower()),
+        "topic": topic,
+        "sessionId": f"computer-fundamentals-generated-{index + 1}",
+    }
+
+
+def _build_computer_fundamentals_fallback_questions(count: int) -> List[Dict[str, Any]]:
+    shuffled = [dict(item) for item in COMPUTER_FUNDAMENTALS_FALLBACK_QUESTIONS]
+    random.shuffle(shuffled)
+    questions: List[Dict[str, Any]] = []
+    round_number = 0
+    while len(questions) < count:
+        for item in shuffled:
+            questions.append({
+                **item,
+                "sessionId": f"computer-fundamentals-fallback-{round_number}-{len(questions) + 1}",
+            })
+            if len(questions) >= count:
+                break
+        round_number += 1
+        random.shuffle(shuffled)
+    return questions[:count]
+
+
+def _build_aptitude_fallback_questions(count: int) -> List[Dict[str, Any]]:
+    shuffled = [dict(item) for item in APTITUDE_FALLBACK_QUESTIONS]
+    random.shuffle(shuffled)
+    questions: List[Dict[str, Any]] = []
+    round_number = 0
+    while len(questions) < count:
+        for item in shuffled:
+            questions.append({
+                **item,
+                "sessionId": f"aptitude-fallback-{round_number}-{len(questions) + 1}",
+            })
+            if len(questions) >= count:
+                break
+        round_number += 1
+        random.shuffle(shuffled)
+    return questions[:count]
+
+
+def _build_reasoning_fallback_questions(count: int) -> List[Dict[str, Any]]:
+    shuffled = [dict(item) for item in REASONING_FALLBACK_QUESTIONS]
+    random.shuffle(shuffled)
+    questions: List[Dict[str, Any]] = []
+    round_number = 0
+    while len(questions) < count:
+        for item in shuffled:
+            questions.append({
+                **item,
+                "sessionId": f"reasoning-fallback-{round_number}-{len(questions) + 1}",
+            })
+            if len(questions) >= count:
+                break
+        round_number += 1
+        random.shuffle(shuffled)
+    return questions[:count]
+
+
+def _build_verbal_fallback_questions(count: int) -> List[Dict[str, Any]]:
+    shuffled = [dict(item) for item in VERBAL_FALLBACK_QUESTIONS]
+    random.shuffle(shuffled)
+    questions: List[Dict[str, Any]] = []
+    round_number = 0
+    while len(questions) < count:
+        for item in shuffled:
+            questions.append({
+                **item,
+                "sessionId": f"verbal-fallback-{round_number}-{len(questions) + 1}",
+            })
+            if len(questions) >= count:
+                break
+        round_number += 1
+        random.shuffle(shuffled)
+    return questions[:count]
+
+
+def _build_advanced_quant_fallback_questions(count: int) -> List[Dict[str, Any]]:
+    shuffled = [dict(item) for item in ADVANCED_QUANT_FALLBACK_QUESTIONS]
+    random.shuffle(shuffled)
+    questions: List[Dict[str, Any]] = []
+    round_number = 0
+    while len(questions) < count:
+        for item in shuffled:
+            questions.append({
+                **item,
+                "sessionId": f"advanced-quant-fallback-{round_number}-{len(questions) + 1}",
+            })
+            if len(questions) >= count:
+                break
+        round_number += 1
+        random.shuffle(shuffled)
+    return questions[:count]
+
+
+async def generate_computer_fundamentals_questions(count: int = 10) -> List[Dict[str, Any]]:
+    normalized_count = max(10, min(int(count or 10), 50))
+    prompt = f"""
+You are generating multiple-choice questions for a Computer Fundamentals practice test.
+
+Return valid JSON with this exact shape:
+{{
+  "questions": [
+    {{
+      "question": "question text",
+      "options": ["option 1", "option 2", "option 3", "option 4"],
+      "answer": "one exact option from the list",
+      "topic": "one of the allowed topics"
+    }}
+  ]
+}}
+
+Rules:
+- Generate exactly {normalized_count} questions.
+- Difficulty must stay easy to moderate, not advanced and not tricky for the sake of being tricky.
+- Cover these topics with a healthy mix: {json.dumps(COMPUTER_FUNDAMENTALS_TOPICS, ensure_ascii=False)}.
+- Focus on interview-style fundamentals for students and entry-level candidates.
+- Each question must have exactly 4 distinct options.
+- Only one option can be correct.
+- The answer must exactly match one of the options.
+- Avoid duplicate or near-duplicate questions.
+- Avoid markdown fences.
+- Freshness seed: {uuid.uuid4().hex}
+"""
+
+    try:
+        payload, _provider = await _generate_json_with_fallback(
+            prompt,
+            ["gemini", "ollama"],
+            0.3,
+            30,
+        )
+        raw_questions = payload.get("questions") or []
+        normalized_questions = [
+            _normalize_generated_mcq(item, index)
+            for index, item in enumerate(raw_questions)
+            if isinstance(item, dict)
+        ]
+        deduped_questions: List[Dict[str, Any]] = []
+        seen_questions = set()
+        for item in normalized_questions:
+            key = item["question"].strip().lower()
+            if key in seen_questions:
+                continue
+            seen_questions.add(key)
+            deduped_questions.append(item)
+            if len(deduped_questions) >= normalized_count:
+                break
+        if len(deduped_questions) >= normalized_count:
+            return deduped_questions[:normalized_count]
+        raise ProviderError("Generated MCQ set was incomplete.")
+    except ProviderError:
+        return _build_computer_fundamentals_fallback_questions(normalized_count)
+
+
+async def generate_aptitude_questions(count: int = 10) -> List[Dict[str, Any]]:
+    normalized_count = max(10, min(int(count or 10), 50))
+    prompt = f"""
+You are generating multiple-choice questions for an aptitude practice test.
+
+Return valid JSON with this exact shape:
+{{
+  "questions": [
+    {{
+      "question": "question text",
+      "options": ["option 1", "option 2", "option 3", "option 4"],
+      "answer": "one exact option from the list",
+      "topic": "one of the allowed topics"
+    }}
+  ]
+}}
+
+Rules:
+- Generate exactly {normalized_count} questions.
+- Difficulty must stay easy to moderate, suitable for real aptitude test practice.
+- Cover these topics with a healthy mix: {json.dumps(APTITUDE_TOPICS, ensure_ascii=False)}.
+- Prefer calculation, logic, interpretation, and formula-based aptitude questions.
+- Do not include verbal grammar, computer fundamentals, or coding questions here.
+- Each question must have exactly 4 distinct options.
+- Only one option can be correct.
+- The answer must exactly match one of the options.
+- Avoid duplicate or near-duplicate questions.
+- Avoid markdown fences.
+- Freshness seed: {uuid.uuid4().hex}
+"""
+
+    try:
+        payload, _provider = await _generate_json_with_fallback(
+            prompt,
+            ["gemini", "ollama"],
+            0.3,
+            30,
+        )
+        raw_questions = payload.get("questions") or []
+        normalized_questions = [
+            _normalize_generated_mcq(item, index)
+            for index, item in enumerate(raw_questions)
+            if isinstance(item, dict)
+        ]
+        deduped_questions: List[Dict[str, Any]] = []
+        seen_questions = set()
+        for item in normalized_questions:
+            key = item["question"].strip().lower()
+            if key in seen_questions:
+                continue
+            seen_questions.add(key)
+            deduped_questions.append({
+                **item,
+                "sessionId": f"aptitude-generated-{len(deduped_questions) + 1}",
+            })
+            if len(deduped_questions) >= normalized_count:
+                break
+        if len(deduped_questions) >= normalized_count:
+            return deduped_questions[:normalized_count]
+        raise ProviderError("Generated aptitude MCQ set was incomplete.")
+    except ProviderError:
+        return _build_aptitude_fallback_questions(normalized_count)
+
+
+async def generate_reasoning_questions(count: int = 10) -> List[Dict[str, Any]]:
+    normalized_count = max(10, min(int(count or 10), 50))
+    prompt = f"""
+You are generating multiple-choice questions for a reasoning practice test.
+
+Return valid JSON with this exact shape:
+{{
+  "questions": [
+    {{
+      "question": "question text",
+      "options": ["option 1", "option 2", "option 3", "option 4"],
+      "answer": "one exact option from the list",
+      "topic": "one of the allowed topics"
+    }}
+  ]
+}}
+
+Rules:
+- Generate exactly {normalized_count} questions.
+- Difficulty must stay easy to moderate, suitable for aptitude and placement reasoning practice.
+- Cover these topics with a healthy mix: {json.dumps(REASONING_TOPICS, ensure_ascii=False)}.
+- Do not include verbal grammar, coding, or computer fundamentals questions.
+- Prefer short, clear reasoning MCQs with one definite correct answer.
+- Include some non-verbal or figure-based reasoning questions, but describe the visual pattern fully in words so the question works without actual images.
+- Each question must have exactly 4 distinct options.
+- Only one option can be correct.
+- The answer must exactly match one of the options.
+- Avoid duplicate or near-duplicate questions.
+- Avoid markdown fences.
+- Freshness seed: {uuid.uuid4().hex}
+"""
+
+    try:
+        payload, _provider = await _generate_json_with_fallback(
+            prompt,
+            ["gemini", "ollama"],
+            0.3,
+            30,
+        )
+        raw_questions = payload.get("questions") or []
+        normalized_questions = [
+            _normalize_generated_mcq(item, index)
+            for index, item in enumerate(raw_questions)
+            if isinstance(item, dict)
+        ]
+        deduped_questions: List[Dict[str, Any]] = []
+        seen_questions = set()
+        for item in normalized_questions:
+            key = item["question"].strip().lower()
+            if key in seen_questions:
+                continue
+            seen_questions.add(key)
+            deduped_questions.append({
+                **item,
+                "sessionId": f"reasoning-generated-{len(deduped_questions) + 1}",
+            })
+            if len(deduped_questions) >= normalized_count:
+                break
+        if len(deduped_questions) >= normalized_count:
+            return deduped_questions[:normalized_count]
+        raise ProviderError("Generated reasoning MCQ set was incomplete.")
+    except ProviderError:
+        return _build_reasoning_fallback_questions(normalized_count)
+
+
+async def generate_verbal_questions(count: int = 10) -> List[Dict[str, Any]]:
+    normalized_count = max(10, min(int(count or 10), 50))
+    prompt = f"""
+You are generating multiple-choice questions for a verbal ability practice test.
+
+Return valid JSON with this exact shape:
+{{
+  "questions": [
+    {{
+      "question": "question text",
+      "options": ["option 1", "option 2", "option 3", "option 4"],
+      "answer": "one exact option from the list",
+      "topic": "one of the allowed topics"
+    }}
+  ]
+}}
+
+Rules:
+- Generate exactly {normalized_count} questions.
+- Difficulty must stay easy to moderate, suitable for placement-style verbal practice.
+- Cover these topics with a healthy mix: {json.dumps(VERBAL_TOPICS, ensure_ascii=False)}.
+- Do not include coding, computer fundamentals, or quantitative aptitude questions.
+- Prefer short, clear MCQs with one definite correct answer.
+- For Reading Comprehension, keep the passage short and include the needed context inside the question.
+- Each question must have exactly 4 distinct options.
+- Only one option can be correct.
+- The answer must exactly match one of the options.
+- Avoid duplicate or near-duplicate questions.
+- Avoid markdown fences.
+- Freshness seed: {uuid.uuid4().hex}
+"""
+
+    try:
+        payload, _provider = await _generate_json_with_fallback(
+            prompt,
+            ["gemini", "ollama"],
+            0.3,
+            30,
+        )
+        raw_questions = payload.get("questions") or []
+        normalized_questions = [
+            _normalize_generated_mcq(item, index)
+            for index, item in enumerate(raw_questions)
+            if isinstance(item, dict)
+        ]
+        deduped_questions: List[Dict[str, Any]] = []
+        seen_questions = set()
+        for item in normalized_questions:
+            key = item["question"].strip().lower()
+            if key in seen_questions:
+                continue
+            seen_questions.add(key)
+            deduped_questions.append({
+                **item,
+                "sessionId": f"verbal-generated-{len(deduped_questions) + 1}",
+            })
+            if len(deduped_questions) >= normalized_count:
+                break
+        if len(deduped_questions) >= normalized_count:
+            return deduped_questions[:normalized_count]
+        raise ProviderError("Generated verbal MCQ set was incomplete.")
+    except ProviderError:
+        return _build_verbal_fallback_questions(normalized_count)
+
+
+async def generate_advanced_quant_questions(count: int = 10) -> List[Dict[str, Any]]:
+    normalized_count = max(10, min(int(count or 10), 50))
+    prompt = f"""
+You are generating multiple-choice questions for an advanced quantitative ability practice test.
+
+Return valid JSON with this exact shape:
+{{
+  "questions": [
+    {{
+      "question": "question text",
+      "options": ["option 1", "option 2", "option 3", "option 4"],
+      "answer": "one exact option from the list",
+      "topic": "one of the allowed topics"
+    }}
+  ]
+}}
+
+Rules:
+- Generate exactly {normalized_count} questions.
+- Difficulty must be intermediate to hard, but still solvable in a placement-style timed test.
+- Cover these topics with a healthy mix: {json.dumps(ADVANCED_QUANT_TOPICS, ensure_ascii=False)}.
+- Do not include verbal, reasoning, coding, or computer fundamentals questions.
+- Prefer quantitative problem-solving MCQs with one definite correct answer.
+- Each question must have exactly 4 distinct options.
+- Only one option can be correct.
+- The answer must exactly match one of the options.
+- Avoid duplicate or near-duplicate questions.
+- Avoid markdown fences.
+- Freshness seed: {uuid.uuid4().hex}
+"""
+
+    try:
+        payload, _provider = await _generate_json_with_fallback(
+            prompt,
+            ["gemini", "ollama"],
+            0.35,
+            30,
+        )
+        raw_questions = payload.get("questions") or []
+        normalized_questions = [
+            _normalize_generated_mcq(item, index)
+            for index, item in enumerate(raw_questions)
+            if isinstance(item, dict)
+        ]
+        deduped_questions: List[Dict[str, Any]] = []
+        seen_questions = set()
+        for item in normalized_questions:
+            key = item["question"].strip().lower()
+            if key in seen_questions:
+                continue
+            seen_questions.add(key)
+            deduped_questions.append({
+                **item,
+                "sessionId": f"advanced-quant-generated-{len(deduped_questions) + 1}",
+            })
+            if len(deduped_questions) >= normalized_count:
+                break
+        if len(deduped_questions) >= normalized_count:
+            return deduped_questions[:normalized_count]
+        raise ProviderError("Generated advanced quantitative MCQ set was incomplete.")
+    except ProviderError:
+        return _build_advanced_quant_fallback_questions(normalized_count)
+
+
 async def _infer_role_blueprint(payload: Dict[str, Any]) -> Tuple[Dict[str, Any], str]:
     selected_mode = payload.get("selected_mode") or "general"
     category = payload.get("category") or "general"

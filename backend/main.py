@@ -50,6 +50,11 @@ from interview_ai import (
     complete_interview_session,
     create_interview_session,
     evaluate_interview_answer,
+    generate_advanced_quant_questions,
+    generate_aptitude_questions,
+    generate_computer_fundamentals_questions,
+    generate_reasoning_questions,
+    generate_verbal_questions,
     get_ai_provider_status,
     get_session_payload,
     get_session_status,
@@ -4109,6 +4114,66 @@ async def submit_coding_solution(payload: dict = Body(...)):
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to submit coding solution: {exc}")
+
+
+@app.post("/mcq/computer-fundamentals")
+async def create_computer_fundamentals_mcqs(payload: dict = Body(...)):
+    try:
+        count = payload.get("count") or 10
+        questions = await generate_computer_fundamentals_questions(count)
+        return {"questions": questions}
+    except ProviderError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to generate computer fundamentals questions: {exc}")
+
+
+@app.post("/mcq/aptitude")
+async def create_aptitude_mcqs(payload: dict = Body(...)):
+    try:
+        count = payload.get("count") or 10
+        questions = await generate_aptitude_questions(count)
+        return {"questions": questions}
+    except ProviderError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to generate aptitude questions: {exc}")
+
+
+@app.post("/mcq/reasoning")
+async def create_reasoning_mcqs(payload: dict = Body(...)):
+    try:
+        count = payload.get("count") or 10
+        questions = await generate_reasoning_questions(count)
+        return {"questions": questions}
+    except ProviderError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to generate reasoning questions: {exc}")
+
+
+@app.post("/mcq/verbal")
+async def create_verbal_mcqs(payload: dict = Body(...)):
+    try:
+        count = payload.get("count") or 10
+        questions = await generate_verbal_questions(count)
+        return {"questions": questions}
+    except ProviderError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to generate verbal questions: {exc}")
+
+
+@app.post("/mcq/advanced-quant")
+async def create_advanced_quant_mcqs(payload: dict = Body(...)):
+    try:
+        count = payload.get("count") or 10
+        questions = await generate_advanced_quant_questions(count)
+        return {"questions": questions}
+    except ProviderError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to generate advanced quantitative questions: {exc}")
 
 
 @app.get("/ai-interview/session/{session_id}")

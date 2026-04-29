@@ -1,69 +1,146 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
-import { Info } from "lucide-react";
+import { Info, MonitorUp, ShieldAlert, PhoneOff, Calculator, UserCircle2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import "../App.css";
 import MiniNavbar from "../components/MiniNavbar";
 import aptitudeHero from "../assets/aptitude.png";
+import logo from "../assets/Website Logo.png";
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || "http://127.0.0.1:8000";
 const CODING_HISTORY_KEY = "apis-coding-question-history";
 const CODING_POOL_KEY = "apis-coding-question-pool";
+const APTITUDE_EXAM_SESSION_KEY = "apis-aptitude-exam-session";
 const HIDDEN_LANGUAGE_IDS = new Set(["go", "rust", "php", "ruby", "kotlin", "swift"]);
+const APTITUDE_STARTUP_MESSAGES = [
+  "Generating questions...",
+  "Organizing section-wise timers...",
+  "Preparing your exam workspace...",
+  "Finalizing instructions and navigation...",
+];
 
 const SECTION_OPTIONS = [
+  { id: "aptitude-mock", title: "Aptitude Mock", mode: "mock", description: "A real-world mixed aptitude round with timed sections across fundamentals, quant, reasoning, verbal, and coding." },
   { id: "aptitude", title: "Aptitude", mode: "mcq", description: "Quantitative practice with arithmetic, percentage, ratio, averages, and data questions." },
+  { id: "advanced-quant", title: "Advanced Quantitative Ability", mode: "mcq", description: "Intermediate-to-hard quantitative aptitude with tougher arithmetic, DI, probability, and problem-solving questions." },
   { id: "reasoning", title: "Reasoning", mode: "mcq", description: "Series, coding-decoding, analogy, arrangement, and logic-based questions." },
   { id: "verbal", title: "Qualitative / Verbal", mode: "mcq", description: "Vocabulary, grammar, fill-in-the-blanks, punctuation, and comprehension practice." },
+  { id: "computer-fundamentals", title: "Computer Fundamentals", mode: "mcq", description: "Easy-to-moderate MCQs from DBMS, OS, CN, OOP, data structures, algorithms, and core CS basics." },
   { id: "coding", title: "Coding", mode: "coding", description: "Choose a coding level and solve multiple AI-generated coding questions in a platform-style editor." },
 ];
 
 const CODING_LEVELS = [
-  { id: "easy", title: "Easy", timerMinutes: 10, description: "Beginner-friendly DSA problems with straightforward logic and basic optimization." },
-  { id: "medium", title: "Medium", timerMinutes: 12, description: "Interview-style coding questions with stronger edge cases and cleaner implementation needs." },
-  { id: "hard", title: "Hard", timerMinutes: 15, description: "More challenging coding problems that need stronger reasoning and optimization." },
+  { id: "basic", title: "Basic", timerMinutes: 10, description: "Beginner-friendly DSA problems with straightforward logic and basic optimization." },
+  { id: "advanced", title: "Advanced", timerMinutes: 14, description: "A mixed medium-to-hard coding track with stronger edge cases, optimization, and interview-style problem solving." },
+  { id: "mixed", title: "Basic + Advanced", timerMinutes: 12, description: "A blended coding track that includes both beginner-friendly and advanced interview-style problems." },
 ];
 
+const APTITUDE_MOCK_COUNT_OPTIONS = [30, 60, 90, 120];
+
+const APTITUDE_MOCK_SECTION_ORDER = [
+  "computer-fundamentals",
+  "aptitude",
+  "reasoning",
+  "verbal",
+  "advanced-quant",
+  "coding-basic",
+  "coding-advanced",
+];
+
+const SETUP_SECTION_ORDER = [
+  "aptitude-mock",
+  "computer-fundamentals",
+  "aptitude",
+  "reasoning",
+  "verbal",
+  "advanced-quant",
+  "coding",
+];
+
+const APTITUDE_MOCK_DISTRIBUTION = {
+  30: {
+    "computer-fundamentals": 5,
+    aptitude: 8,
+    reasoning: 7,
+    verbal: 4,
+    "advanced-quant": 4,
+    "coding-basic": 1,
+    "coding-advanced": 1,
+  },
+  60: {
+    "computer-fundamentals": 11,
+    aptitude: 17,
+    reasoning: 14,
+    verbal: 8,
+    "advanced-quant": 8,
+    "coding-basic": 1,
+    "coding-advanced": 1,
+  },
+  90: {
+    "computer-fundamentals": 17,
+    aptitude: 26,
+    reasoning: 21,
+    verbal: 12,
+    "advanced-quant": 12,
+    "coding-basic": 1,
+    "coding-advanced": 1,
+  },
+  120: {
+    "computer-fundamentals": 23,
+    aptitude: 35,
+    reasoning: 28,
+    verbal: 16,
+    "advanced-quant": 16,
+    "coding-basic": 1,
+    "coding-advanced": 1,
+  },
+};
+
 const QUESTION_BANKS = {
-  aptitude: [
-    { question: "What is 15% of 240?", options: ["24", "30", "36", "42"], answer: "36" },
-    { question: "The average of 12, 18, 20, and 30 is:", options: ["18", "20", "22", "24"], answer: "20" },
-    { question: "A train travels 180 km in 3 hours. What is its speed?", options: ["50 km/h", "55 km/h", "60 km/h", "65 km/h"], answer: "60 km/h" },
-    { question: "What is 3/4 of 84?", options: ["56", "60", "63", "66"], answer: "63" },
-    { question: "What is 18 squared?", options: ["288", "304", "324", "342"], answer: "324" },
-    { question: "What is 40% of 350?", options: ["120", "130", "140", "150"], answer: "140" },
-    { question: "If 25% of a number is 75, the number is:", options: ["250", "275", "300", "325"], answer: "300" },
-    { question: "What is the area of a rectangle with length 15 cm and breadth 8 cm?", options: ["100", "110", "120", "130"], answer: "120" },
-    { question: "What is 11% of 900?", options: ["89", "95", "99", "101"], answer: "99" },
-    { question: "What is the cube of 4?", options: ["16", "32", "48", "64"], answer: "64" },
-  ],
   reasoning: [
-    { question: "Find the next number: 3, 6, 12, 24, ?", options: ["30", "36", "42", "48"], answer: "48" },
-    { question: "Odd one out: Circle, Triangle, Square, Table", options: ["Circle", "Square", "Table", "Triangle"], answer: "Table" },
-    { question: "If CAT is coded as DBU, how is DOG coded?", options: ["EPH", "EPG", "DOH", "FPH"], answer: "EPH" },
-    { question: "Find the missing term: A, C, F, J, ?", options: ["M", "N", "O", "P"], answer: "O" },
-    { question: "Complete the pattern: 2, 5, 10, 17, 26, ?", options: ["35", "36", "37", "38"], answer: "37" },
-    { question: "Find the next letter group: AZ, BY, CX, ?", options: ["DW", "DV", "EW", "DX"], answer: "DW" },
-    { question: "Choose the analogy: Finger is to Hand as Toe is to:", options: ["Foot", "Leg", "Nail", "Ankle"], answer: "Foot" },
-    { question: "Find the next number: 1, 4, 9, 16, ?", options: ["20", "24", "25", "36"], answer: "25" },
-    { question: "What comes next: B, E, H, K, ?", options: ["L", "M", "N", "O"], answer: "N" },
-    { question: "Find the next number: 81, 27, 9, 3, ?", options: ["1", "0", "2", "6"], answer: "1" },
   ],
   verbal: [
-    { question: "Choose the synonym of 'Rapid'.", options: ["Slow", "Quick", "Calm", "Late"], answer: "Quick" },
-    { question: "Choose the antonym of 'Expand'.", options: ["Stretch", "Increase", "Shrink", "Lengthen"], answer: "Shrink" },
-    { question: "Fill in the blank: She ____ to the office every day.", options: ["go", "goes", "gone", "going"], answer: "goes" },
-    { question: "Which sentence is grammatically correct?", options: ["He don't like tea.", "He doesn't likes tea.", "He doesn't like tea.", "He not like tea."], answer: "He doesn't like tea." },
-    { question: "Choose the correctly spelled word.", options: ["Accomodate", "Acommodate", "Accommodate", "Acomodate"], answer: "Accommodate" },
-    { question: "Fill in the blank: We have lived here ____ 2019.", options: ["for", "since", "from", "at"], answer: "since" },
-    { question: "Choose the antonym of 'Ancient'.", options: ["Old", "Historic", "Modern", "Traditional"], answer: "Modern" },
-    { question: "Choose the correct article: She bought ____ umbrella.", options: ["a", "an", "the", "no article"], answer: "an" },
-    { question: "Pick the synonym of 'Accurate'.", options: ["Exact", "Random", "Weak", "Harsh"], answer: "Exact" },
-    { question: "Choose the best meaning of 'Reluctant'.", options: ["Willing", "Uncertain", "Unwilling", "Excited"], answer: "Unwilling" },
   ],
 };
 
 function getSectionConfig(sectionId) {
   return SECTION_OPTIONS.find((section) => section.id === sectionId) || SECTION_OPTIONS[0];
+}
+
+function getAptitudeMockSectionMeta(sectionId) {
+  const sectionMap = {
+    "computer-fundamentals": { id: "computer-fundamentals", title: "Computer Fundamentals", mode: "mcq" },
+    aptitude: { id: "aptitude", title: "Aptitude", mode: "mcq" },
+    reasoning: { id: "reasoning", title: "Reasoning", mode: "mcq" },
+    verbal: { id: "verbal", title: "Verbal", mode: "mcq" },
+    "advanced-quant": { id: "advanced-quant", title: "Advanced Quantitative Ability", mode: "mcq" },
+    "coding-basic": { id: "coding-basic", title: "Coding Basic", mode: "coding", codingLevel: "basic" },
+    "coding-advanced": { id: "coding-advanced", title: "Coding Advanced", mode: "coding", codingLevel: "advanced" },
+  };
+  return sectionMap[sectionId] || { id: sectionId, title: sectionId, mode: "mcq" };
+}
+
+function getOrderedSetupSections() {
+  const orderIndex = new Map(SETUP_SECTION_ORDER.map((id, index) => [id, index]));
+  return [...SECTION_OPTIONS].sort((a, b) => {
+    const aIndex = orderIndex.has(a.id) ? orderIndex.get(a.id) : Number.MAX_SAFE_INTEGER;
+    const bIndex = orderIndex.has(b.id) ? orderIndex.get(b.id) : Number.MAX_SAFE_INTEGER;
+    return aIndex - bIndex;
+  });
+}
+
+function getCodingLevelConfig(levelId) {
+  return CODING_LEVELS.find((level) => level.id === levelId) || CODING_LEVELS[0];
+}
+
+function getCodingSourceLevels(levelId) {
+  if (levelId === "advanced") {
+    return ["medium", "hard"];
+  }
+  if (levelId === "mixed") {
+    return ["easy", "medium", "hard"];
+  }
+  return ["easy"];
 }
 
 function isCodingSection(sectionId) {
@@ -77,9 +154,37 @@ function getConfiguredQuestionCount(sectionId, selectedCount) {
   return Math.max(selectedCount, 10);
 }
 
+function getSecondsPerQuestion(sectionId) {
+  if (sectionId === "computer-fundamentals") {
+    return 30;
+  }
+  if (sectionId === "advanced-quant") {
+    return 90;
+  }
+  return 60;
+}
+
+function isMockSection(sectionId) {
+  return sectionId === "aptitude-mock";
+}
+
+function getMockTotalDuration(selectedCount) {
+  const distribution = APTITUDE_MOCK_DISTRIBUTION[selectedCount] || APTITUDE_MOCK_DISTRIBUTION[30];
+  return APTITUDE_MOCK_SECTION_ORDER.reduce((total, sectionId) => {
+    const count = distribution[sectionId] || 0;
+    if (sectionId === "coding-basic") {
+      return total + (count * ((getCodingLevelConfig("basic").timerMinutes || 10) * 60));
+    }
+    if (sectionId === "coding-advanced") {
+      return total + (count * ((getCodingLevelConfig("advanced").timerMinutes || 14) * 60));
+    }
+    return total + (count * getSecondsPerQuestion(sectionId));
+  }, 0);
+}
+
 function getConfiguredDuration(sectionId, selectedCount) {
   if (isCodingSection(sectionId)) return 0;
-  return getConfiguredQuestionCount(sectionId, selectedCount) * 60;
+  return getConfiguredQuestionCount(sectionId, selectedCount) * getSecondsPerQuestion(sectionId);
 }
 
 function formatTime(totalSeconds) {
@@ -116,14 +221,28 @@ function buildMcqQuestions(sectionId, count) {
   return questions.slice(0, count);
 }
 
-function createSummary(sectionId, questions, answers, reason = "manual") {
+function buildAttemptCounts(totalQuestions, answeredCount, visitedQuestions = []) {
+  const visitedFromState = Array.isArray(visitedQuestions) ? visitedQuestions.filter(Boolean).length : 0;
+  const visitedCount = Math.max(answeredCount, Math.min(totalQuestions, visitedFromState || answeredCount));
+  const notVisitedCount = Math.max(totalQuestions - visitedCount, 0);
+  const notAnsweredCount = Math.max(visitedCount - answeredCount, 0);
+  return {
+    visitedCount,
+    notVisitedCount,
+    notAnsweredCount,
+  };
+}
+
+function createSummary(sectionId, questions, answers, reason = "manual", visitedQuestions = []) {
   const answeredCount = answers.filter((answer) => (answer || "").trim().length > 0).length;
   const score = questions.filter((question, index) => answers[index] === question.answer).length;
+  const counts = buildAttemptCounts(questions.length, answeredCount, visitedQuestions);
   return {
     sectionId,
     mode: "mcq",
     totalQuestions: questions.length,
     answeredCount,
+    ...counts,
     score,
     autoSubmitted: reason === "auto",
     items: questions.map((question, index) => ({
@@ -135,7 +254,7 @@ function createSummary(sectionId, questions, answers, reason = "manual") {
   };
 }
 
-function createCodingSessionSummary(sectionId, challenges, answers, language, runResults, submitResults, reason = "manual") {
+function createCodingSessionSummary(sectionId, challenges, answers, language, runResults, submitResults, reason = "manual", visitedQuestions = []) {
   const items = (challenges || []).map((challenge, index) => {
     const execution = submitResults[index]?.execution || runResults[index] || { passed: 0, total: 0, results: [], status: "not_run" };
     return {
@@ -146,11 +265,14 @@ function createCodingSessionSummary(sectionId, challenges, answers, language, ru
       language,
     };
   });
+  const answeredCount = items.filter((item) => item.sourceCode.trim()).length;
+  const counts = buildAttemptCounts(items.length, answeredCount, visitedQuestions);
   return {
     sectionId,
     mode: "coding",
     totalQuestions: items.length,
-    answeredCount: items.filter((item) => item.sourceCode.trim()).length,
+    answeredCount,
+    ...counts,
     score: items.reduce((total, item) => total + (item.execution.passed || 0), 0),
     autoSubmitted: reason === "auto",
     codingItems: items,
@@ -456,6 +578,26 @@ function buildLocalCodingSession(level, count, excludedKeys = []) {
   return items;
 }
 
+function buildLocalCodingSessionFromLevels(levels, count, excludedKeys = []) {
+  const sourceLevels = Array.isArray(levels) && levels.length ? levels : ["easy"];
+  const excluded = new Set(excludedKeys);
+  const items = [];
+  let index = 0;
+  let attempts = 0;
+  while (items.length < count && attempts < count * 20) {
+    const sourceLevel = sourceLevels[index % sourceLevels.length];
+    const challenge = buildLocalCodingFallback(sourceLevel, Math.floor(index / sourceLevels.length));
+    const key = getCodingChallengeKey(challenge);
+    if (!excluded.has(key)) {
+      excluded.add(key);
+      items.push(challenge);
+    }
+    index += 1;
+    attempts += 1;
+  }
+  return items;
+}
+
 function buildGuaranteedCodingSession(level, count, excludedKeys = []) {
   const uniqueItems = buildLocalCodingSession(level, count, excludedKeys);
   if (uniqueItems.length >= count) {
@@ -466,6 +608,23 @@ function buildGuaranteedCodingSession(level, count, excludedKeys = []) {
   let index = 0;
   while (filledItems.length < count) {
     filledItems.push(buildLocalCodingFallback(level, index));
+    index += 1;
+  }
+  return filledItems;
+}
+
+function buildGuaranteedCodingSessionFromLevels(levels, count, excludedKeys = []) {
+  const sourceLevels = Array.isArray(levels) && levels.length ? levels : ["easy"];
+  const uniqueItems = buildLocalCodingSessionFromLevels(sourceLevels, count, excludedKeys);
+  if (uniqueItems.length >= count) {
+    return uniqueItems;
+  }
+
+  const filledItems = [...uniqueItems];
+  let index = 0;
+  while (filledItems.length < count) {
+    const sourceLevel = sourceLevels[index % sourceLevels.length];
+    filledItems.push(buildLocalCodingFallback(sourceLevel, Math.floor(index / sourceLevels.length)));
     index += 1;
   }
   return filledItems;
@@ -524,8 +683,129 @@ async function fetchUniqueCodingChallenges(level, desiredCount, excludedKeys = [
   };
 }
 
-function AptitudeTest() {
-  const [stage, setStage] = useState("landing");
+async function fetchUniqueCodingChallengesForLevels(levels, desiredCount, excludedKeys = []) {
+  const sourceLevels = Array.isArray(levels) && levels.length ? levels : ["easy"];
+  const uniqueChallenges = [];
+  const seenChallengeKeys = new Set((excludedKeys || []).filter(Boolean));
+  let attempts = 0;
+  const maxAttempts = Math.max(desiredCount * 4, 12);
+
+  while (uniqueChallenges.length < desiredCount && attempts < maxAttempts) {
+    const remaining = desiredCount - uniqueChallenges.length;
+    const batchSize = Math.min(Math.max(remaining, 2), 4);
+    attempts += batchSize;
+
+    const responses = await Promise.all(
+      Array.from({ length: batchSize }, (_, batchIndex) =>
+        axios.post(`${API_BASE_URL}/coding/challenge`, {
+          difficulty: sourceLevels[(uniqueChallenges.length + batchIndex) % sourceLevels.length],
+          excluded_questions: Array.from(seenChallengeKeys),
+        }).catch(() => null)
+      )
+    );
+
+    responses.forEach((response) => {
+      const rawChallenge = response?.data?.challenge;
+      if (!rawChallenge || uniqueChallenges.length >= desiredCount) {
+        return;
+      }
+
+      const normalizedChallenge = normalizeCodingChallenge(rawChallenge, uniqueChallenges.length);
+      const challengeKey = getCodingChallengeKey(normalizedChallenge);
+      if (!challengeKey || seenChallengeKeys.has(challengeKey)) {
+        return;
+      }
+
+      seenChallengeKeys.add(challengeKey);
+      uniqueChallenges.push(normalizedChallenge);
+    });
+  }
+
+  return {
+    challenges: uniqueChallenges,
+    seenKeys: Array.from(seenChallengeKeys),
+  };
+}
+
+async function fetchGeneratedMcqSection(sectionId, count) {
+  const endpoint = sectionId === "aptitude"
+    ? "aptitude"
+    : sectionId === "advanced-quant"
+      ? "advanced-quant"
+      : sectionId === "reasoning"
+        ? "reasoning"
+        : sectionId === "verbal"
+          ? "verbal"
+          : "computer-fundamentals";
+  const response = await axios.post(`${API_BASE_URL}/mcq/${endpoint}`, { count });
+  const sessionQuestions = Array.isArray(response.data?.questions) ? response.data.questions : [];
+  if (!sessionQuestions.length) {
+    throw new Error(`No ${sectionId} questions were generated.`);
+  }
+  return sessionQuestions.map((question, index) => ({
+    ...question,
+    sessionId: question.sessionId || `${sectionId}-mock-${index + 1}`,
+  }));
+}
+
+async function buildMockCodingSection(sectionId, count) {
+  const meta = getAptitudeMockSectionMeta(sectionId);
+  const sourceLevels = getCodingSourceLevels(meta.codingLevel || "basic");
+  const { challenges } = await fetchUniqueCodingChallengesForLevels(sourceLevels, count, []);
+  const sessionQuestions = challenges.length
+    ? challenges
+    : buildGuaranteedCodingSessionFromLevels(sourceLevels, count, []);
+  return {
+    ...meta,
+    questions: sessionQuestions,
+    totalDuration: count * ((getCodingLevelConfig(meta.codingLevel || "basic").timerMinutes || 10) * 60),
+    timeLeft: count * ((getCodingLevelConfig(meta.codingLevel || "basic").timerMinutes || 10) * 60),
+    answers: new Array(sessionQuestions.length).fill(""),
+    visitedQuestions: sessionQuestions.map((_, index) => index === 0),
+    currentIndex: 0,
+    codingRunResults: new Array(sessionQuestions.length).fill(null),
+    codingRunSources: new Array(sessionQuestions.length).fill(""),
+    codingSubmitResults: new Array(sessionQuestions.length).fill(null),
+    codingLanguage: "",
+    count,
+  };
+}
+
+async function buildMockMcqSection(sectionId, count) {
+  const meta = getAptitudeMockSectionMeta(sectionId);
+  const questions = await fetchGeneratedMcqSection(sectionId, count);
+  return {
+    ...meta,
+    questions,
+    totalDuration: count * getSecondsPerQuestion(sectionId),
+    timeLeft: count * getSecondsPerQuestion(sectionId),
+    secondsPerQuestion: getSecondsPerQuestion(sectionId),
+    answers: new Array(questions.length).fill(""),
+    visitedQuestions: questions.map((_, index) => index === 0),
+    currentIndex: 0,
+    count,
+  };
+}
+
+function createMockSummary(sectionResults, reason = "manual") {
+  const safeResults = Array.isArray(sectionResults) ? sectionResults : [];
+  return {
+    sectionId: "aptitude-mock",
+    mode: "mock",
+    totalQuestions: safeResults.reduce((total, item) => total + (item.totalQuestions || 0), 0),
+    answeredCount: safeResults.reduce((total, item) => total + (item.answeredCount || 0), 0),
+    visitedCount: safeResults.reduce((total, item) => total + (item.visitedCount || 0), 0),
+    notVisitedCount: safeResults.reduce((total, item) => total + (item.notVisitedCount || 0), 0),
+    notAnsweredCount: safeResults.reduce((total, item) => total + (item.notAnsweredCount || 0), 0),
+    score: safeResults.reduce((total, item) => total + (item.score || 0), 0),
+    autoSubmitted: reason === "auto",
+    sections: safeResults,
+  };
+}
+
+function AptitudeTest({ examOnly = false }) {
+  const navigate = useNavigate();
+  const [stage, setStage] = useState(examOnly ? "loading" : "landing");
   const [selectedSection, setSelectedSection] = useState("aptitude");
   const [questionCount, setQuestionCount] = useState(10);
   const [questions, setQuestions] = useState([]);
@@ -534,8 +814,9 @@ function AptitudeTest() {
   const [timeLeft, setTimeLeft] = useState(0);
   const [summary, setSummary] = useState(null);
   const [runtimeLanguages, setRuntimeLanguages] = useState([]);
-  const [codingLevel, setCodingLevel] = useState("easy");
+  const [codingLevel, setCodingLevel] = useState("basic");
   const [codingLanguage, setCodingLanguage] = useState("");
+  const [visitedQuestions, setVisitedQuestions] = useState([]);
   const [codingRunResults, setCodingRunResults] = useState([]);
   const [codingRunSources, setCodingRunSources] = useState([]);
   const [codingSubmitResults, setCodingSubmitResults] = useState([]);
@@ -543,26 +824,80 @@ function AptitudeTest() {
   const [codingRunLoading, setCodingRunLoading] = useState(false);
   const [codingSubmitLoading, setCodingSubmitLoading] = useState(false);
   const [codingError, setCodingError] = useState("");
+  const [startError, setStartError] = useState("");
   const [codingTimerStarted, setCodingTimerStarted] = useState(false);
   const [startingTest, setStartingTest] = useState(false);
+  const [mockSections, setMockSections] = useState([]);
+  const [mockSectionIndex, setMockSectionIndex] = useState(0);
+  const [mockSectionResults, setMockSectionResults] = useState([]);
+  const [examIntroStep, setExamIntroStep] = useState("fullscreen");
+  const [examConsentChecked, setExamConsentChecked] = useState(false);
+  const [isExamFullscreen, setIsExamFullscreen] = useState(false);
+  const [examStateLoaded, setExamStateLoaded] = useState(!examOnly);
+  const [showEndExamConfirm, setShowEndExamConfirm] = useState(false);
+  const [startupCountdown, setStartupCountdown] = useState(null);
+  const [startupMessage, setStartupMessage] = useState(APTITUDE_STARTUP_MESSAGES[0]);
+  const [startupMessageVisible, setStartupMessageVisible] = useState(true);
+  const [showFullscreenWarning, setShowFullscreenWarning] = useState(false);
+  const [showConsentWarning, setShowConsentWarning] = useState(false);
+  const [showDetailedResults, setShowDetailedResults] = useState(false);
+  const [showCalculator, setShowCalculator] = useState(false);
+  const [calculatorExpression, setCalculatorExpression] = useState("");
   const setupSectionRef = useRef(null);
+  const startupRunIdRef = useRef(0);
+  const startupOverlayRef = useRef(null);
 
   const selectedSectionConfig = useMemo(() => getSectionConfig(selectedSection), [selectedSection]);
-  const codingMode = selectedSectionConfig.mode === "coding";
-  const configuredQuestionCount = getConfiguredQuestionCount(selectedSection, questionCount);
-  const configuredDuration = codingMode
-    ? configuredQuestionCount * ((CODING_LEVELS.find((level) => level.id === codingLevel)?.timerMinutes || 10) * 60)
+  const mockMode = isMockSection(selectedSection);
+  const activeMockSection = mockMode && stage === "test" ? mockSections[mockSectionIndex] : null;
+  const activeMode = activeMockSection?.mode || selectedSectionConfig.mode;
+  const activeSectionId = activeMockSection?.id || selectedSection;
+  const activeSectionTitle = activeMockSection?.title || selectedSectionConfig.title;
+  const codingMode = activeMode === "coding";
+  const selectedCodingLevel = getCodingLevelConfig(codingLevel);
+  const codingSourceLevels = getCodingSourceLevels(codingLevel);
+  const configuredQuestionCount = mockMode
+    ? (APTITUDE_MOCK_COUNT_OPTIONS.includes(questionCount) ? questionCount : APTITUDE_MOCK_COUNT_OPTIONS[0])
+    : getConfiguredQuestionCount(selectedSection, questionCount);
+  const secondsPerQuestion = codingMode
+    ? 0
+    : activeMockSection?.secondsPerQuestion || getSecondsPerQuestion(activeSectionId);
+  const configuredDuration = mockMode
+    ? getMockTotalDuration(configuredQuestionCount)
+    : codingMode
+    ? configuredQuestionCount * ((selectedCodingLevel?.timerMinutes || 10) * 60)
     : getConfiguredDuration(selectedSection, questionCount);
   const totalMinutes = Math.floor(configuredDuration / 60);
   const currentQuestion = questions[currentIndex];
   const answeredCount = answers.filter((answer) => (answer || "").trim().length > 0).length;
+  const visitedQuestionCount = visitedQuestions.filter(Boolean).length;
   const minQuestionCount = codingMode ? 5 : 10;
   const sliderMaxQuestionCount = codingMode ? 20 : 50;
-  const isOverviewStage = stage === "landing" || stage === "setup";
+  const overallTimeLeft = stage === "exam-entry" ? configuredDuration : timeLeft;
+  const showExamWorkspace = examOnly && (stage === "exam-entry" || stage === "test");
+  const showExamSummary = examOnly && stage === "summary" && summary;
+  const showExamHeaderControls = stage === "test";
+  const showPrestartCancel = stage === "exam-entry";
+  const isLandingStage = stage === "landing";
+  const isSetupStage = stage === "setup";
   const selectedRuntime = useMemo(() => runtimeLanguages.find((item) => item.id === codingLanguage) || null, [runtimeLanguages, codingLanguage]);
   const currentCodingRunResult = codingRunResults[currentIndex] || null;
   const isCodingBusy = codingRunLoading || codingSubmitLoading;
   const hasSelectedCodingLanguage = Boolean(codingLanguage);
+  const candidateName = useMemo(() => {
+    try {
+      const rawUser = window.localStorage.getItem("user");
+      const parsedUser = rawUser ? JSON.parse(rawUser) : null;
+      const firstName = String(parsedUser?.first_name || parsedUser?.firstName || "").trim();
+      const lastName = String(parsedUser?.last_name || parsedUser?.lastName || "").trim();
+      const combinedName = [firstName, lastName].filter(Boolean).join(" ").trim();
+      const name = combinedName || parsedUser?.full_name || parsedUser?.fullName || parsedUser?.name || parsedUser?.username;
+      if (name) return String(name);
+    } catch {
+      // Ignore parsing issues and fall back.
+    }
+    return "Candidate";
+  }, []);
 
   useEffect(() => {
     let ignore = false;
@@ -603,9 +938,105 @@ function AptitudeTest() {
   }, []);
 
   useEffect(() => {
+    if (!examOnly) {
+      return;
+    }
+    try {
+      const raw = window.sessionStorage.getItem(APTITUDE_EXAM_SESSION_KEY);
+      const saved = raw ? JSON.parse(raw) : null;
+      if (!saved || typeof saved !== "object") {
+        navigate("/aptitude-test", { replace: true });
+        return;
+      }
+
+      setStage(saved.stage || "exam-entry");
+      setSelectedSection(saved.selectedSection || "aptitude");
+      setQuestionCount(saved.questionCount || 10);
+      setQuestions(saved.questions || []);
+      setAnswers(saved.answers || []);
+      setCurrentIndex(saved.currentIndex || 0);
+      setVisitedQuestions(saved.visitedQuestions || []);
+      setTimeLeft(saved.timeLeft || 0);
+      setSummary(saved.summary || null);
+      setCodingLevel(saved.codingLevel || "basic");
+      setCodingLanguage(saved.codingLanguage || "");
+      setCodingRunResults(saved.codingRunResults || []);
+      setCodingRunSources(saved.codingRunSources || []);
+      setCodingSubmitResults(saved.codingSubmitResults || []);
+      setMockSections(saved.mockSections || []);
+      setMockSectionIndex(saved.mockSectionIndex || 0);
+      setMockSectionResults(saved.mockSectionResults || []);
+      setExamIntroStep(saved.examIntroStep || "fullscreen");
+      setExamConsentChecked(Boolean(saved.examConsentChecked));
+      setExamStateLoaded(true);
+    } catch {
+      navigate("/aptitude-test", { replace: true });
+    }
+  }, [examOnly, navigate]);
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      const isFullscreen = Boolean(document.fullscreenElement);
+      setIsExamFullscreen(isFullscreen);
+      if (!examOnly) return;
+      if (!isFullscreen && (stage === "test" || (stage === "exam-entry" && examIntroStep === "instructions"))) {
+        setShowFullscreenWarning(true);
+      } else if (isFullscreen) {
+        setShowFullscreenWarning(false);
+      }
+    };
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    onFullscreenChange();
+    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+  }, [examIntroStep, examOnly, stage]);
+
+  useEffect(() => {
+    if (!startingTest || startupCountdown != null) return undefined;
+    let messageIndex = 0;
+    const interval = window.setInterval(() => {
+      messageIndex = (messageIndex + 1) % APTITUDE_STARTUP_MESSAGES.length;
+      setStartupMessageVisible(false);
+      window.setTimeout(() => {
+        setStartupMessage(APTITUDE_STARTUP_MESSAGES[messageIndex]);
+        setStartupMessageVisible(true);
+      }, 180);
+    }, 1800);
+    return () => window.clearInterval(interval);
+  }, [startingTest, startupCountdown]);
+
+  useEffect(() => {
+    if (!showConsentWarning) return undefined;
+    const timeoutId = window.setTimeout(() => {
+      setShowConsentWarning(false);
+    }, 2600);
+    return () => window.clearTimeout(timeoutId);
+  }, [showConsentWarning]);
+
+  useEffect(() => {
+    if (stage === "summary" && summary) {
+      setShowDetailedResults(false);
+    }
+  }, [stage, summary]);
+
+  useEffect(() => {
+    if (!startingTest) return;
+    window.requestAnimationFrame(() => {
+      const lowerViewportOffset = Math.max((window.innerHeight - 420) / 2 + 460, 0);
+      window.scrollTo({ top: lowerViewportOffset, left: 0, behavior: "smooth" });
+    });
+  }, [startingTest]);
+
+  useEffect(() => {
     if (codingMode) return;
     setQuestionCount((current) => Math.max(current, 10));
   }, [codingMode, selectedSection]);
+
+  useEffect(() => {
+    if (!mockMode) return;
+    if (!APTITUDE_MOCK_COUNT_OPTIONS.includes(questionCount)) {
+      setQuestionCount(APTITUDE_MOCK_COUNT_OPTIONS[0]);
+    }
+  }, [mockMode, questionCount]);
 
   useEffect(() => {
     if (!codingMode || !currentQuestion || !codingLanguage) return;
@@ -620,30 +1051,53 @@ function AptitudeTest() {
   }, [codingLanguage, codingMode, currentIndex, currentQuestion]);
 
   useEffect(() => {
+    if (!questions.length) {
+      setVisitedQuestions([]);
+      return;
+    }
+    setVisitedQuestions((currentVisited) => {
+      const normalized = questions.map((_, index) => Boolean(currentVisited[index]));
+      normalized[currentIndex] = true;
+      if (mockMode) {
+        patchActiveMockSection({ visitedQuestions: normalized });
+      }
+      return normalized;
+    });
+  }, [currentIndex, mockMode, questions]);
+
+  useEffect(() => {
     if (stage !== "test" || !codingMode || !currentQuestion || codingTimerStarted) return;
-    setTimeLeft(configuredDuration);
+    if (!mockMode) {
+      setTimeLeft(activeMockSection?.totalDuration || configuredDuration);
+    }
     setCodingTimerStarted(true);
-  }, [codingMode, codingTimerStarted, configuredDuration, currentQuestion, stage]);
+  }, [activeMockSection, codingMode, codingTimerStarted, configuredDuration, currentQuestion, mockMode, stage]);
 
   useEffect(() => {
     if (stage !== "test") return undefined;
     if (codingMode && (!codingTimerStarted || !currentQuestion)) return undefined;
     if (timeLeft <= 0) {
-      if (codingMode && (answers[currentIndex] || "").trim()) {
+      if (mockMode) {
+        setSummary(buildMockSubmitSummary("auto"));
+        setStage("summary");
+        window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+      } else if (codingMode && (answers[currentIndex] || "").trim()) {
         void handleSubmitCode("auto");
       } else if (!codingMode) {
         setStage("summary");
-        setSummary(createSummary(selectedSection, questions, answers, "auto"));
+        setSummary(createSummary(selectedSection, questions, answers, "auto", visitedQuestions));
         window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
       }
       return undefined;
     }
     const timer = window.setInterval(() => {
-      setTimeLeft((currentTime) => currentTime - 1);
+      setTimeLeft((currentTime) => {
+        return currentTime - 1;
+      });
     }, 1000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [answers, codingMode, questions, selectedSection, stage, timeLeft, currentIndex]);
+  }, [answers, codingLanguage, codingMode, codingRunResults, codingSubmitResults, currentIndex, currentQuestion, mockMode, questions, selectedSection, stage, timeLeft, codingTimerStarted, activeMockSection]);
 
   function scrollToSetupSection() {
     window.requestAnimationFrame(() => {
@@ -651,11 +1105,133 @@ function AptitudeTest() {
     });
   }
 
+  function patchActiveMockSection(patchOrUpdater) {
+    setMockSections((currentSections) => currentSections.map((section, index) => {
+      if (index !== mockSectionIndex) {
+        return section;
+      }
+      const nextPatch = typeof patchOrUpdater === "function" ? patchOrUpdater(section) : patchOrUpdater;
+      return {
+        ...section,
+        ...nextPatch,
+      };
+    }));
+  }
+
+  async function requestExamFullscreen() {
+    if (document.fullscreenElement) {
+      setIsExamFullscreen(true);
+      return true;
+    }
+    try {
+      await document.documentElement.requestFullscreen();
+      setIsExamFullscreen(true);
+      return true;
+    } catch {
+      setStartError("Fullscreen permission was denied. Please allow fullscreen to continue.");
+      return false;
+    }
+  }
+
+  function launchExamRoute(sessionPayload) {
+    window.sessionStorage.setItem(APTITUDE_EXAM_SESSION_KEY, JSON.stringify(sessionPayload));
+    navigate("/aptitude-exam");
+  }
+
+  async function runExamLaunchCountdown(seconds = 3) {
+    const activeRunId = startupRunIdRef.current;
+    setStartupCountdown(seconds);
+    for (let remaining = seconds; remaining > 0; remaining -= 1) {
+      if (activeRunId !== startupRunIdRef.current) {
+        setStartupCountdown(null);
+        return false;
+      }
+      setStartupCountdown(remaining);
+      // Give the user a clear visual start cue before navigation.
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    }
+    if (activeRunId !== startupRunIdRef.current) {
+      setStartupCountdown(null);
+      return false;
+    }
+    setStartupCountdown(0);
+    await new Promise((resolve) => window.setTimeout(resolve, 250));
+    if (activeRunId !== startupRunIdRef.current) {
+      setStartupCountdown(null);
+      return false;
+    }
+    setStartupCountdown(null);
+    return true;
+  }
+
+  function loadMockSection(index, sections = mockSections) {
+    const nextSection = sections[index];
+    if (!nextSection) {
+      return;
+    }
+    setMockSectionIndex(index);
+    setQuestions(nextSection.questions || []);
+    setAnswers(nextSection.answers || new Array((nextSection.questions || []).length).fill(""));
+    setCurrentIndex(nextSection.currentIndex || 0);
+    setVisitedQuestions(nextSection.visitedQuestions || []);
+    if (!mockMode) {
+      setTimeLeft(nextSection.timeLeft ?? nextSection.totalDuration ?? 0);
+    }
+    setSummary(null);
+    setCodingRunResults(nextSection.codingRunResults || new Array((nextSection.questions || []).length).fill(null));
+    setCodingRunSources(nextSection.codingRunSources || new Array((nextSection.questions || []).length).fill(""));
+    setCodingSubmitResults(nextSection.codingSubmitResults || new Array((nextSection.questions || []).length).fill(null));
+    setCodingRunLoading(false);
+    setCodingSubmitLoading(false);
+    setCodingError("");
+    setCodingTimerStarted(nextSection.mode !== "coding");
+    if (nextSection.mode === "coding") {
+      setCodingLevel(nextSection.codingLevel || "basic");
+      setCodingLanguage(nextSection.codingLanguage || "");
+    }
+    if (nextSection.mode !== "coding") {
+      setCodingLanguage("");
+    }
+    setStage("test");
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }
+
+  function finishMockSection(sectionSummary, reason = "manual") {
+    const resultWithMeta = {
+      ...sectionSummary,
+      title: activeMockSection?.title || getAptitudeMockSectionMeta(activeMockSection?.id || "").title,
+      sectionOrder: mockSectionIndex,
+    };
+    const nextResults = [...mockSectionResults, resultWithMeta];
+    setMockSectionResults(nextResults);
+
+    if (mockSectionIndex >= mockSections.length - 1) {
+      setSummary(createMockSummary(nextResults, reason));
+      setStage("summary");
+      window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+      return;
+    }
+
+    loadMockSection(mockSectionIndex + 1, mockSections);
+  }
+
   function handleOpenSetup() {
+    if (examOnly) {
+      if (document.fullscreenElement) {
+        void document.exitFullscreen().catch(() => {});
+      }
+      window.sessionStorage.removeItem(APTITUDE_EXAM_SESSION_KEY);
+      navigate("/aptitude-test");
+      return;
+    }
     if (startingTest) return;
     setStage("setup");
     setQuestions([]);
     setAnswers([]);
+    setVisitedQuestions([]);
     setCurrentIndex(0);
     setSummary(null);
     setTimeLeft(0);
@@ -665,13 +1241,102 @@ function AptitudeTest() {
     setCodingRunLoading(false);
     setCodingSubmitLoading(false);
     setCodingError("");
+    setStartError("");
     setCodingTimerStarted(false);
+    setMockSections([]);
+    setMockSectionIndex(0);
+    setMockSectionResults([]);
+    setExamIntroStep("fullscreen");
+    setExamConsentChecked(false);
+    setStartupCountdown(null);
+    setStartupMessage(APTITUDE_STARTUP_MESSAGES[0]);
+    setStartupMessageVisible(true);
+    setShowFullscreenWarning(false);
+    setShowConsentWarning(false);
     scrollToSetupSection();
+  }
+
+  function openExamEntry() {
+    setExamIntroStep("fullscreen");
+    setExamConsentChecked(false);
+    setShowConsentWarning(false);
+    setStage("exam-entry");
+    window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+  }
+
+  function beginPreparedExam() {
+    setStage("test");
+    setShowFullscreenWarning(false);
+    window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+  }
+
+  function cancelStartupLaunch() {
+    startupRunIdRef.current += 1;
+    setStartingTest(false);
+    setStartupCountdown(null);
+    setStartupMessage(APTITUDE_STARTUP_MESSAGES[0]);
+    setStartupMessageVisible(true);
+    setStartError("");
   }
 
   async function handleStartTest() {
     if (startingTest) return;
+    const startupRunId = startupRunIdRef.current + 1;
+    startupRunIdRef.current = startupRunId;
     setStartingTest(true);
+    setStartError("");
+    setStartupCountdown(null);
+    setStartupMessage(APTITUDE_STARTUP_MESSAGES[0]);
+    setStartupMessageVisible(true);
+
+    if (mockMode) {
+      try {
+        const distribution = APTITUDE_MOCK_DISTRIBUTION[configuredQuestionCount] || APTITUDE_MOCK_DISTRIBUTION[30];
+        const builtSections = await Promise.all(
+          APTITUDE_MOCK_SECTION_ORDER.map(async (sectionId) => {
+            const count = distribution[sectionId] || 0;
+            if (sectionId.startsWith("coding-")) {
+              return buildMockCodingSection(sectionId, count);
+            }
+            return buildMockMcqSection(sectionId, count);
+          }),
+        );
+        if (startupRunId !== startupRunIdRef.current) return;
+        const firstSection = builtSections[0];
+        const sessionPayload = {
+          stage: "exam-entry",
+          selectedSection,
+          questionCount: configuredQuestionCount,
+          questions: firstSection?.questions || [],
+          answers: firstSection?.answers || [],
+          currentIndex: firstSection?.currentIndex || 0,
+          visitedQuestions: firstSection?.visitedQuestions || [],
+          timeLeft: configuredDuration,
+          summary: null,
+          codingLevel: firstSection?.codingLevel || "basic",
+          codingLanguage: firstSection?.codingLanguage || "",
+          codingRunResults: firstSection?.codingRunResults || [],
+          codingRunSources: firstSection?.codingRunSources || [],
+          codingSubmitResults: firstSection?.codingSubmitResults || [],
+          mockSections: builtSections,
+          mockSectionIndex: 0,
+          mockSectionResults: [],
+          examIntroStep: "fullscreen",
+          examConsentChecked: false,
+        };
+        const countdownCompleted = await runExamLaunchCountdown(3);
+        if (!countdownCompleted || startupRunId !== startupRunIdRef.current) return;
+        launchExamRoute(sessionPayload);
+      } catch (error) {
+        if (startupRunId !== startupRunIdRef.current) return;
+        setStartError(error?.response?.data?.detail || error?.message || "Failed to generate aptitude mock sections.");
+      } finally {
+        if (startupRunId === startupRunIdRef.current) {
+          setStartingTest(false);
+        }
+      }
+      return;
+    }
 
     if (codingMode) {
       const seenHistory = loadSeenCodingQuestions();
@@ -679,8 +1344,8 @@ function AptitudeTest() {
       const questionPool = loadCodingQuestionPool();
       const poolForLevel = Array.isArray(questionPool[codingLevel]) ? questionPool[codingLevel] : [];
       const pooledChallenges = dedupeCodingChallenges(poolForLevel, seenForLevel, configuredQuestionCount);
-      const fallbackChallenges = buildGuaranteedCodingSession(
-        codingLevel,
+      const fallbackChallenges = buildGuaranteedCodingSessionFromLevels(
+        codingSourceLevels,
         configuredQuestionCount - pooledChallenges.length,
         [...seenForLevel, ...pooledChallenges.map((challenge) => getCodingChallengeKey(challenge))],
       );
@@ -689,6 +1354,7 @@ function AptitudeTest() {
         const key = getCodingChallengeKey(challenge);
         return key && !initialChallenges.some((item) => getCodingChallengeKey(item) === key);
       });
+      if (startupRunId !== startupRunIdRef.current) return;
 
       setQuestions(initialChallenges);
       setAnswers(new Array(initialChallenges.length).fill(""));
@@ -699,8 +1365,31 @@ function AptitudeTest() {
       setTimeLeft(0);
       setSummary(null);
       setCodingTimerStarted(false);
-      setStage("test");
-      window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+      const sessionPayload = {
+        stage: "exam-entry",
+        selectedSection,
+        questionCount: configuredQuestionCount,
+        questions: initialChallenges,
+        answers: new Array(initialChallenges.length).fill(""),
+        currentIndex: 0,
+        visitedQuestions: initialChallenges.map((_, index) => index === 0),
+        timeLeft: 0,
+        summary: null,
+        codingLevel,
+        codingLanguage: "",
+        codingRunResults: new Array(initialChallenges.length).fill(null),
+        codingRunSources: new Array(initialChallenges.length).fill(""),
+        codingSubmitResults: new Array(initialChallenges.length).fill(null),
+        mockSections: [],
+        mockSectionIndex: 0,
+        mockSectionResults: [],
+        examIntroStep: "fullscreen",
+        examConsentChecked: false,
+      };
+
+      const countdownCompleted = await runExamLaunchCountdown(3);
+      if (!countdownCompleted || startupRunId !== startupRunIdRef.current) return;
+      launchExamRoute(sessionPayload);
 
       saveSeenCodingQuestions({
         ...seenHistory,
@@ -722,8 +1411,8 @@ function AptitudeTest() {
             ...initialChallenges.map((challenge) => getCodingChallengeKey(challenge)),
             ...remainingPool.map((challenge) => getCodingChallengeKey(challenge)),
           ];
-          const { challenges: aiChallenges } = await fetchUniqueCodingChallenges(
-            codingLevel,
+          const { challenges: aiChallenges } = await fetchUniqueCodingChallengesForLevels(
+            codingSourceLevels,
             configuredQuestionCount + 8,
             aiSeedExclusions,
           );
@@ -746,23 +1435,263 @@ function AptitudeTest() {
       return;
     }
 
+    if (selectedSection === "aptitude" || selectedSection === "advanced-quant" || selectedSection === "reasoning" || selectedSection === "verbal" || selectedSection === "computer-fundamentals") {
+      try {
+        const endpoint = selectedSection === "aptitude"
+          ? "aptitude"
+          : selectedSection === "advanced-quant"
+            ? "advanced-quant"
+          : selectedSection === "reasoning"
+            ? "reasoning"
+            : selectedSection === "verbal"
+              ? "verbal"
+            : "computer-fundamentals";
+        const response = await axios.post(`${API_BASE_URL}/mcq/${endpoint}`, {
+          count: configuredQuestionCount,
+        });
+        if (startupRunId !== startupRunIdRef.current) return;
+        const sessionQuestions = Array.isArray(response.data?.questions) ? response.data.questions : [];
+        if (!sessionQuestions.length) {
+          throw new Error("No questions were generated.");
+        }
+        setQuestions(sessionQuestions);
+        setAnswers(new Array(sessionQuestions.length).fill(""));
+        setCurrentIndex(0);
+        setTimeLeft(configuredDuration);
+        setSummary(null);
+        const sessionPayload = {
+          stage: "exam-entry",
+          selectedSection,
+          questionCount: configuredQuestionCount,
+          questions: sessionQuestions,
+          answers: new Array(sessionQuestions.length).fill(""),
+          currentIndex: 0,
+          visitedQuestions: sessionQuestions.map((_, index) => index === 0),
+          timeLeft: configuredDuration,
+          summary: null,
+          codingLevel,
+          codingLanguage: "",
+          codingRunResults: [],
+          codingRunSources: [],
+          codingSubmitResults: [],
+          mockSections: [],
+          mockSectionIndex: 0,
+          mockSectionResults: [],
+          examIntroStep: "fullscreen",
+          examConsentChecked: false,
+        };
+        const countdownCompleted = await runExamLaunchCountdown(3);
+        if (!countdownCompleted || startupRunId !== startupRunIdRef.current) return;
+        launchExamRoute(sessionPayload);
+      } catch (error) {
+        if (startupRunId !== startupRunIdRef.current) return;
+        setStartError(
+          error?.response?.data?.detail
+          || error?.message
+          || `Failed to generate ${selectedSection === "aptitude" ? "aptitude" : selectedSection === "advanced-quant" ? "advanced quantitative" : selectedSection === "reasoning" ? "reasoning" : selectedSection === "verbal" ? "verbal" : "computer fundamentals"} questions.`,
+        );
+      } finally {
+        if (startupRunId === startupRunIdRef.current) {
+          setStartingTest(false);
+        }
+      }
+      return;
+    }
+
     const sessionQuestions = buildMcqQuestions(selectedSection, configuredQuestionCount);
     setQuestions(sessionQuestions);
     setAnswers(new Array(sessionQuestions.length).fill(""));
     setCurrentIndex(0);
     setTimeLeft(configuredDuration);
     setSummary(null);
-    setStage("test");
-    setStartingTest(false);
-    window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+    const sessionPayload = {
+      stage: "exam-entry",
+      selectedSection,
+      questionCount: configuredQuestionCount,
+      questions: sessionQuestions,
+      answers: new Array(sessionQuestions.length).fill(""),
+      currentIndex: 0,
+      visitedQuestions: sessionQuestions.map((_, index) => index === 0),
+      timeLeft: configuredDuration,
+      summary: null,
+      codingLevel,
+      codingLanguage: "",
+      codingRunResults: [],
+      codingRunSources: [],
+      codingSubmitResults: [],
+      mockSections: [],
+      mockSectionIndex: 0,
+      mockSectionResults: [],
+      examIntroStep: "fullscreen",
+      examConsentChecked: false,
+    };
+    const countdownCompleted = await runExamLaunchCountdown(3);
+    if (!countdownCompleted || startupRunId !== startupRunIdRef.current) return;
+    launchExamRoute(sessionPayload);
+    if (startupRunId === startupRunIdRef.current) {
+      setStartingTest(false);
+    }
   }
 
   function handleSelectAnswer(value) {
     setAnswers((currentAnswers) => {
       const nextAnswers = [...currentAnswers];
       nextAnswers[currentIndex] = value;
+      if (mockMode) {
+        patchActiveMockSection({ answers: nextAnswers, visitedQuestions });
+      }
       return nextAnswers;
     });
+  }
+
+  function handlePreviousQuestion() {
+    const nextIndex = Math.max(0, currentIndex - 1);
+    setCurrentIndex(nextIndex);
+    if (mockMode) {
+      patchActiveMockSection({ currentIndex: nextIndex, visitedQuestions });
+    }
+  }
+
+  function handleNextQuestion() {
+    const nextIndex = Math.min(questions.length - 1, currentIndex + 1);
+    setCurrentIndex(nextIndex);
+    if (mockMode) {
+      patchActiveMockSection({ currentIndex: nextIndex, visitedQuestions });
+    }
+  }
+
+  function buildMockSubmitSummary(reason = "manual") {
+    const latestSections = mockSections.map((section, index) => {
+      if (index === mockSectionIndex) {
+        return {
+          ...section,
+          answers,
+          visitedQuestions,
+          currentIndex,
+          timeLeft,
+          codingRunResults,
+          codingRunSources,
+          codingSubmitResults,
+          codingLanguage,
+        };
+      }
+      return section;
+    });
+
+    const sectionResults = latestSections.map((section) => (
+      section.mode === "coding"
+        ? {
+          ...createCodingSessionSummary(
+            section.id,
+            section.questions || [],
+            section.answers || [],
+            section.codingLanguage || codingLanguage,
+            section.codingRunResults || [],
+            section.codingSubmitResults || [],
+            reason,
+            section.visitedQuestions || [],
+          ),
+          title: section.title,
+        }
+        : {
+          ...createSummary(section.id, section.questions || [], section.answers || [], reason, section.visitedQuestions || []),
+          title: section.title,
+        }
+    ));
+    return createMockSummary(sectionResults, reason);
+  }
+
+  function finalizeEndExam() {
+    if (stage !== "test") {
+      setShowEndExamConfirm(false);
+      setShowFullscreenWarning(false);
+      handleOpenSetup();
+      return;
+    }
+    let nextSummary;
+    if (mockMode) {
+      nextSummary = buildMockSubmitSummary("manual");
+    } else if (codingMode) {
+      nextSummary = createCodingSessionSummary(selectedSection, questions, answers, codingLanguage, codingRunResults, codingSubmitResults, "manual", visitedQuestions);
+    } else {
+      nextSummary = createSummary(selectedSection, questions, answers, "manual", visitedQuestions);
+    }
+    setSummary(nextSummary);
+    setShowEndExamConfirm(false);
+    setShowFullscreenWarning(false);
+    setStage("summary");
+    window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+  }
+
+  function handleEndExam() {
+    setShowEndExamConfirm(true);
+  }
+
+  function handleBackHome() {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => {});
+    }
+    if (examOnly) {
+      window.sessionStorage.removeItem(APTITUDE_EXAM_SESSION_KEY);
+    }
+    navigate("/");
+  }
+
+  async function handleShowDetailedResults() {
+    if (document.fullscreenElement) {
+      try {
+        await document.exitFullscreen();
+      } catch {
+        // Ignore exit failures and still reveal the detailed results.
+      }
+    }
+    setShowDetailedResults(true);
+    window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+  }
+
+  async function handleRestoreFullscreen() {
+    const success = await requestExamFullscreen();
+    if (success) {
+      setShowFullscreenWarning(false);
+    }
+  }
+
+  function handleMockSectionJump(targetIndex) {
+    if (!mockMode || targetIndex === mockSectionIndex || targetIndex < 0 || targetIndex >= mockSections.length) {
+      return;
+    }
+    const syncedSections = mockSections.map((section, index) => (
+      index === mockSectionIndex
+        ? {
+          ...section,
+          answers,
+          currentIndex,
+          timeLeft,
+          codingRunResults,
+          codingRunSources,
+          codingSubmitResults,
+          codingLanguage,
+        }
+        : section
+    ));
+    setMockSections(syncedSections);
+    loadMockSection(targetIndex, syncedSections);
+  }
+
+  async function handleProceedToInstructions() {
+    const success = await requestExamFullscreen();
+    if (success) {
+      setExamIntroStep("instructions");
+    }
+  }
+
+  function handleBeginExamClick() {
+    if (!examConsentChecked) {
+      setShowConsentWarning(true);
+      return;
+    }
+    setShowConsentWarning(false);
+    beginPreparedExam();
   }
 
   async function handleRunCode() {
@@ -788,11 +1717,17 @@ function AptitudeTest() {
       setCodingRunResults((current) => {
         const next = [...current];
         next[currentIndex] = response.data;
+        if (mockMode) {
+          patchActiveMockSection({ codingRunResults: next });
+        }
         return next;
       });
       setCodingRunSources((current) => {
         const next = [...current];
         next[currentIndex] = sourceCode;
+        if (mockMode) {
+          patchActiveMockSection({ codingRunSources: next });
+        }
         return next;
       });
     } catch (error) {
@@ -800,11 +1735,17 @@ function AptitudeTest() {
       setCodingRunResults((current) => {
         const next = [...current];
         next[currentIndex] = null;
+        if (mockMode) {
+          patchActiveMockSection({ codingRunResults: next });
+        }
         return next;
       });
       setCodingRunSources((current) => {
         const next = [...current];
         next[currentIndex] = "";
+        if (mockMode) {
+          patchActiveMockSection({ codingRunSources: next });
+        }
         return next;
       });
     } finally {
@@ -840,14 +1781,56 @@ function AptitudeTest() {
       setCodingSubmitResults((current) => {
         const next = [...current];
         next[currentIndex] = response.data;
+        if (mockMode) {
+          patchActiveMockSection({ codingSubmitResults: next });
+        }
         return next;
       });
+      const nextSubmitResults = [
+        ...codingSubmitResults.slice(0, currentIndex),
+        response.data,
+        ...codingSubmitResults.slice(currentIndex + 1),
+      ];
       if (currentIndex === questions.length - 1) {
-        setSummary(createCodingSessionSummary(selectedSection, questions, answers, codingLanguage, codingRunResults, [...codingSubmitResults.slice(0, currentIndex), response.data, ...codingSubmitResults.slice(currentIndex + 1)], reason));
-        setStage("summary");
-        window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+        const codingSummary = createCodingSessionSummary(
+          mockMode ? (activeMockSection?.id || selectedSection) : selectedSection,
+          questions,
+          answers,
+          codingLanguage,
+          codingRunResults,
+          nextSubmitResults,
+          reason,
+          visitedQuestions,
+        );
+        if (mockMode) {
+          const refreshedSections = mockSections.map((section, index) => (
+            index === mockSectionIndex
+              ? {
+                ...section,
+                answers,
+                visitedQuestions,
+                currentIndex,
+                codingRunResults,
+                codingRunSources,
+                codingSubmitResults: nextSubmitResults,
+                codingLanguage,
+              }
+              : section
+          ));
+          setMockSections(refreshedSections);
+        } else {
+          setSummary(codingSummary);
+          setStage("summary");
+          window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+        }
       } else {
-        setCurrentIndex((current) => current + 1);
+        setCurrentIndex((current) => {
+          const nextIndex = current + 1;
+          if (mockMode) {
+            patchActiveMockSection({ currentIndex: nextIndex, visitedQuestions });
+          }
+          return nextIndex;
+        });
       }
     } catch (error) {
       setCodingError(error?.response?.data?.detail || "Failed to submit solution.");
@@ -857,13 +1840,857 @@ function AptitudeTest() {
   }
 
   function handleFinishMcq(reason = "manual") {
+    const mcqSummary = createSummary(mockMode ? (activeMockSection?.id || selectedSection) : selectedSection, questions, answers, reason, visitedQuestions);
+    if (mockMode) {
+      finishMockSection(mcqSummary, reason);
+      return;
+    }
     setStage("summary");
-    setSummary(createSummary(selectedSection, questions, answers, reason));
+    setSummary(mcqSummary);
     window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+  }
+
+  if (examOnly && !examStateLoaded) {
+    return null;
+  }
+
+  if (showExamWorkspace || showExamSummary) {
+    return (
+      <div className={`aptitude-exam-page ${stage === "summary" && showDetailedResults ? "is-scrollable" : ""}`}>
+        <header className="aptitude-exam-navbar">
+          <div className="aptitude-exam-brand" aria-label="INTERVIEWR brand">
+            <img src={logo} alt="INTERVIEWR Logo" className="navbar-logo" />
+            <div className="navbar-brand-title">
+              <h2>
+                INTERVIEW
+                <span className="brand-r">R</span>
+              </h2>
+              <span className="navbar-brand-pipe">|</span>
+              <span className="navbar-brand-sub">
+                <span>AI Powered</span>
+                <span>Interview System</span>
+              </span>
+            </div>
+          </div>
+
+          {showExamHeaderControls ? (
+            <div className="aptitude-exam-nav-actions">
+              <div className="aptitude-exam-timer-pill">
+                <span>Overall Timer</span>
+                <strong>{formatTime(overallTimeLeft)}</strong>
+              </div>
+              <button type="button" className="aptitude-end-btn" onClick={handleEndExam}>
+                <PhoneOff size={18} strokeWidth={2.1} />
+                End Interview
+              </button>
+            </div>
+          ) : showPrestartCancel ? (
+            <div className="aptitude-exam-nav-actions">
+              <button type="button" className="aptitude-end-btn aptitude-cancel-btn" onClick={handleEndExam}>
+                <PhoneOff size={18} strokeWidth={2.1} />
+                Cancel Interview
+              </button>
+            </div>
+          ) : null}
+        </header>
+
+        {showEndExamConfirm ? (
+          <div className="aptitude-end-modal-backdrop" onClick={() => setShowEndExamConfirm(false)}>
+            <div className="aptitude-end-modal" onClick={(event) => event.stopPropagation()}>
+              <span className="aptitude-chip">{stage === "test" ? "Confirm End" : "Cancel Interview"}</span>
+              <h3>{stage === "test" ? "Do you want to end the interview now?" : "Go back to the aptitude setup page?"}</h3>
+              <p>
+                {stage === "test"
+                  ? "Your current progress will be submitted immediately and the results page will open."
+                  : "The exam has not started yet. You will return to the aptitude setup page."}
+              </p>
+              <div className="aptitude-end-modal-actions">
+                <button type="button" className="small-start-btn aptitude-secondary-btn" onClick={() => setShowEndExamConfirm(false)}>
+                  {stage === "test" ? "Continue Test" : "Stay Here"}
+                </button>
+                <button type="button" className="aptitude-end-btn aptitude-cancel-btn" onClick={finalizeEndExam}>
+                  <PhoneOff size={18} strokeWidth={2.1} />
+                  {stage === "test" ? "End Now" : "Cancel Interview"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {showFullscreenWarning ? (
+          <div className="aptitude-end-modal-backdrop">
+            <div className="aptitude-end-modal aptitude-fullscreen-modal" onClick={(event) => event.stopPropagation()}>
+              <span className="aptitude-chip">Fullscreen Required</span>
+              <h3>Return to fullscreen to continue</h3>
+              <p>This exam flow requires fullscreen mode during the instruction step and the live interview. Please re-enter fullscreen to continue.</p>
+              <div className="aptitude-end-modal-actions">
+                <button type="button" className="mock-btn aptitude-primary-btn" onClick={handleRestoreFullscreen}>
+                  Re-enter Fullscreen
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {showConsentWarning ? (
+          <div className="aptitude-floating-warning" role="alert" aria-live="assertive">
+            Please agree to the exam instructions before starting the test.
+          </div>
+        ) : null}
+
+        {stage === "exam-entry" ? (
+          <main className="aptitude-exam-intro">
+            <section className={`aptitude-exam-intro-card ${examIntroStep === "instructions" ? "is-instructions" : ""}`}>
+              {examIntroStep === "fullscreen" ? (
+                <>
+                  <span className="aptitude-chip">Step 1</span>
+                  <h1>Enter fullscreen before your aptitude test begins</h1>
+                  <p>This exam experience is designed for fullscreen mode so the timer, sections, and question navigation stay stable throughout the test.</p>
+                  <div className="aptitude-entry-callout">
+                    <MonitorUp size={22} strokeWidth={2.1} />
+                    <div>
+                      <strong>Fullscreen is required to continue.</strong>
+                      <p>Click the button below to enter fullscreen, then proceed to the exam instructions.</p>
+                    </div>
+                  </div>
+                  <div className="aptitude-entry-actions">
+                    <button type="button" className="mock-btn aptitude-secondary-btn" onClick={handleOpenSetup}>
+                      Back to Aptitude
+                    </button>
+                    <button type="button" className="mock-btn aptitude-primary-btn" onClick={handleProceedToInstructions}>
+                      Enter Fullscreen
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <span className="aptitude-chip">Step 2</span>
+                  <h1>Read the exam instructions carefully</h1>
+                  <p>Follow these rules for a smooth and fair aptitude exam experience.</p>
+
+                  <div className="aptitude-entry-grid">
+                    <article className="aptitude-entry-panel">
+                      <h3>General Rules</h3>
+                      <ul>
+                        <li>Do not exit fullscreen during the test.</li>
+                        <li>Do not switch tabs, windows, or applications during the test.</li>
+                        <li>Do not refresh or close the exam page once the test begins.</li>
+                        <li>Use the question palette to track answered and unanswered questions.</li>
+                      </ul>
+                    </article>
+
+                    <article className="aptitude-entry-panel">
+                      <h3>Mock Flow</h3>
+                      <ul>
+                        <li>The aptitude mock runs section by section in this order: Computer Fundamentals, Aptitude, Reasoning, Verbal, Advanced Quantitative Ability, Coding Basic, Coding Advanced.</li>
+                        <li>The overall timer is shown in the navbar throughout the mock.</li>
+                        <li>Mock sizes are fixed at 30, 60, 90, or 120 questions.</li>
+                        <li>The coding part includes one Basic coding question and one Advanced coding question.</li>
+                      </ul>
+                    </article>
+                  </div>
+
+                  <div className="aptitude-entry-callout aptitude-entry-callout-warning">
+                    <ShieldAlert size={22} strokeWidth={2.1} />
+                    <div>
+                      <strong>Consent and responsibility</strong>
+                      <p>If any malpractice is done during the exam, the user is responsible for that conduct.</p>
+                    </div>
+                  </div>
+
+                  <label className="aptitude-consent-row">
+                    <input
+                      type="checkbox"
+                      checked={examConsentChecked}
+                      onChange={(event) => {
+                        const checked = event.target.checked;
+                        setExamConsentChecked(checked);
+                        if (checked) {
+                          setShowConsentWarning(false);
+                        }
+                      }}
+                    />
+                    <span>I agree to follow the exam instructions and understand that I am responsible for any malpractice during this test.</span>
+                  </label>
+
+                  <div className="aptitude-entry-actions">
+                    <button type="button" className="mock-btn aptitude-secondary-btn" onClick={() => setExamIntroStep("fullscreen")}>
+                      Back
+                    </button>
+                    <button type="button" className="mock-btn aptitude-primary-btn" disabled={!isExamFullscreen} onClick={handleBeginExamClick}>
+                      Start Test
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {startError ? <div className="aptitude-code-error">{startError}</div> : null}
+            </section>
+          </main>
+        ) : stage === "summary" && summary ? (
+          <main className="aptitude-exam-intro aptitude-exam-summary">
+            <section className="aptitude-exam-intro-card aptitude-summary-shell aptitude-exam-summary-card">
+              <div className="aptitude-summary-hero">
+                <div>
+                  <span className="aptitude-chip">{showDetailedResults ? "Summary" : "Test Complete"}</span>
+                  <h2>{showDetailedResults ? (summary.autoSubmitted ? "Time is over. Your test was auto-submitted." : "Your test summary is ready.") : "Thank you. Your test is over."}</h2>
+                  <p>
+                    {showDetailedResults
+                      ? (summary.mode === "coding"
+                        ? "Below is your coding submission, passed test cases, and AI analysis."
+                        : summary.mode === "mock"
+                        ? "Below is your full aptitude mock review, grouped section by section in the same order as the live test."
+                        : "Below is the answer review with your chosen option and the correct answer for every question.")
+                      : "Your submission has been recorded successfully. Review the counters below, then open the detailed results whenever you are ready."}
+                  </p>
+                </div>
+                <div className="aptitude-summary-score">
+                  <span>{summary.mode === "coding" ? "Passed" : "Score"}</span>
+                  <strong>{summary.score}/{summary.totalQuestions}</strong>
+                  <small>{summary.answeredCount} answered</small>
+                </div>
+              </div>
+
+              {!showDetailedResults ? (
+                <>
+                  <div className="aptitude-summary-counter-grid">
+                    <div className="aptitude-summary-counter-card">
+                      <span>Not Visited</span>
+                      <strong>{summary.notVisitedCount || 0}</strong>
+                    </div>
+                    <div className="aptitude-summary-counter-card is-success">
+                      <span>Answered</span>
+                      <strong>{summary.answeredCount || 0}</strong>
+                    </div>
+                    <div className="aptitude-summary-counter-card is-warning">
+                      <span>Not Answered</span>
+                      <strong>{summary.notAnsweredCount || 0}</strong>
+                    </div>
+                  </div>
+
+                  <div className="aptitude-summary-intro-actions">
+                    <button type="button" className="mock-btn aptitude-primary-btn" onClick={handleShowDetailedResults}>
+                      Show Results
+                    </button>
+                  </div>
+                </>
+              ) : summary.mode === "mock" ? (
+                <div className="aptitude-review-list">
+                  {(summary.sections || []).map((section, sectionIndex) => (
+                    <article key={`mock-section-${section.sectionId}-${sectionIndex}`} className="aptitude-review-card">
+                      <div className="aptitude-review-top">
+                        <span>Section {sectionIndex + 1}</span>
+                        <strong>{section.title}</strong>
+                      </div>
+                      <div className="aptitude-review-answer-grid">
+                        <div>
+                          <span>Score / passed</span>
+                          <p>{section.score}/{section.totalQuestions}</p>
+                        </div>
+                        <div>
+                          <span>Answered</span>
+                          <p>{section.answeredCount}</p>
+                        </div>
+                      </div>
+                      {section.mode === "coding" ? (
+                        <div className="aptitude-review-list">
+                          {(section.codingItems || []).map((item, index) => (
+                            <article key={`mock-coding-${sectionIndex}-${index}`} className="aptitude-review-card is-coding">
+                              <div className="aptitude-review-top">
+                                <span>Coding Question {index + 1}</span>
+                                <strong>{item.execution?.passed || 0}/{item.execution?.total || 0} tests passed</strong>
+                              </div>
+                              <h3>{item.challenge?.title}</h3>
+                              <p className="aptitude-review-prompt">{item.challenge?.description}</p>
+                              <div className="aptitude-review-answer-grid">
+                                <div>
+                                  <span>Language</span>
+                                  <p>{item.language || "N/A"}</p>
+                                </div>
+                                <div>
+                                  <span>AI review</span>
+                                  <p>{item.review?.summary || "No AI review available."}</p>
+                                </div>
+                              </div>
+                            </article>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="aptitude-review-list">
+                          {(section.items || []).map((item, index) => (
+                            <article key={`mock-mcq-${sectionIndex}-${item.sessionId || index}`} className={`aptitude-review-card ${item.isCorrect ? "is-correct" : "is-incorrect"}`}>
+                              <div className="aptitude-review-top">
+                                <span>Question {index + 1}</span>
+                                <strong>{item.isCorrect ? "Correct" : "Review needed"}</strong>
+                              </div>
+                              <h3>{item.question}</h3>
+                              <div className="aptitude-review-answer-grid">
+                                <div>
+                                  <span>Your answer</span>
+                                  <p>{item.selectedAnswer}</p>
+                                </div>
+                                <div>
+                                  <span>Correct answer</span>
+                                  <p>{item.correctAnswer}</p>
+                                </div>
+                              </div>
+                            </article>
+                          ))}
+                        </div>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              ) : summary.mode === "coding" ? (
+                <div className="aptitude-review-list">
+                  {(summary.codingItems || []).map((item, index) => (
+                    <article key={`coding-summary-${index}`} className="aptitude-review-card is-coding">
+                      <div className="aptitude-review-top">
+                        <span>Coding Question {index + 1}</span>
+                        <strong>{item.execution?.passed || 0}/{item.execution?.total || 0} tests passed</strong>
+                      </div>
+                      <h3>{item.challenge?.title}</h3>
+                      <p className="aptitude-review-prompt">{item.challenge?.description}</p>
+                      <div className="aptitude-review-answer-grid">
+                        <div>
+                          <span>Language</span>
+                          <p>{item.language || "N/A"}</p>
+                        </div>
+                        <div>
+                          <span>AI review</span>
+                          <p>{item.review?.summary || "No AI review available."}</p>
+                        </div>
+                      </div>
+                      <div className="aptitude-code-results">
+                        <div className="aptitude-code-results-header">
+                          <strong>Test Case Results</strong>
+                          <span>{item.execution?.passed || 0}/{item.execution?.total || 0}</span>
+                        </div>
+                        {(item.execution?.results || []).map((result) => (
+                          <div key={`summary-${index}-${result.index}`} className={`aptitude-code-result-card ${result.passed ? "is-pass" : "is-fail"}`}>
+                            <strong>Test Case {result.index}</strong>
+                            <div>Input: {result.input || "N/A"}</div>
+                            <div>Expected: {result.expected_output || "N/A"}</div>
+                            <div>Actual: {result.actual_output || "N/A"}</div>
+                            {result.stderr ? <div>Error: {result.stderr}</div> : null}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="aptitude-review-answer-grid">
+                        <div>
+                          <span>Your code</span>
+                          <p className="aptitude-code-summary-text">{item.sourceCode || "No code submitted."}</p>
+                        </div>
+                        <div>
+                          <span>Improvement suggestions</span>
+                          <p className="aptitude-code-summary-text">{(item.review?.next_steps || []).join(" | ") || "No suggestions available."}</p>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <>
+                  <div className="aptitude-summary-grid">
+                    <div className="aptitude-summary-stat">
+                      <span>Section</span>
+                      <strong>{getSectionConfig(summary.sectionId).title}</strong>
+                    </div>
+                    <div className="aptitude-summary-stat">
+                      <span>Total questions</span>
+                      <strong>{summary.totalQuestions}</strong>
+                    </div>
+                    <div className="aptitude-summary-stat">
+                      <span>Correct answers</span>
+                      <strong>{summary.score}</strong>
+                    </div>
+                    <div className="aptitude-summary-stat">
+                      <span>Not answered</span>
+                      <strong>{summary.totalQuestions - summary.answeredCount}</strong>
+                    </div>
+                  </div>
+                  <div className="aptitude-review-list">
+                    {summary.items.map((item, index) => (
+                      <article key={item.sessionId} className={`aptitude-review-card ${item.isCorrect ? "is-correct" : "is-incorrect"}`}>
+                        <div className="aptitude-review-top">
+                          <span>Question {index + 1}</span>
+                          <strong>{item.isCorrect ? "Correct" : "Review needed"}</strong>
+                        </div>
+                        <h3>{item.question}</h3>
+                        <div className="aptitude-review-answer-grid">
+                          <div>
+                            <span>Your answer</span>
+                            <p>{item.selectedAnswer}</p>
+                          </div>
+                          <div>
+                            <span>Correct answer</span>
+                            <p>{item.correctAnswer}</p>
+                          </div>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {showDetailedResults ? (
+                <div className="aptitude-flow-actions">
+                  <button type="button" className="small-start-btn aptitude-secondary-btn aptitude-summary-btn" onClick={handleOpenSetup}>Practice Again</button>
+                  <button type="button" className="small-start-btn aptitude-secondary-btn aptitude-summary-btn" onClick={handleBackHome}>
+                    Back to Home
+                  </button>
+                  <button type="button" className="mock-btn aptitude-primary-btn aptitude-summary-btn" onClick={handleOpenSetup}>
+                    Back to Aptitude
+                  </button>
+                </div>
+              ) : null}
+            </section>
+          </main>
+        ) : (
+          <main className="aptitude-exam-shell">
+            {mockMode ? (
+              <div className="aptitude-exam-sections-bar">
+                <div className="aptitude-exam-sections-track">
+                  {mockSections.map((section, index) => (
+                    <button
+                      key={section.id}
+                      type="button"
+                      className={`aptitude-section-tab ${index === mockSectionIndex ? "is-active" : ""}`}
+                      onClick={() => handleMockSectionJump(index)}
+                    >
+                      <span>{section.title}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="aptitude-calculator-anchor">
+                  <button
+                    type="button"
+                    className={`aptitude-calculator-toggle ${showCalculator ? "is-active" : ""}`}
+                    onClick={() => setShowCalculator((current) => !current)}
+                  >
+                    <Calculator size={18} strokeWidth={2} />
+                    Calculator
+                  </button>
+
+                  {showCalculator ? (
+                    <div className="aptitude-calculator-popover">
+                      <div className="aptitude-exam-panel-head">
+                        <span className="aptitude-chip">Calculator</span>
+                        <button type="button" className="aptitude-calculator-close" onClick={() => setShowCalculator(false)}>Close</button>
+                      </div>
+                      <div className="aptitude-calculator-display">
+                        {calculatorExpression || "0"}
+                      </div>
+                      <div className="aptitude-calculator-grid">
+                        {["(", ")", "^", "/", "sin(", "cos(", "tan(", "*", "sqrt(", "log(", "ln(", "-", "7", "8", "9", "+", "4", "5", "6", "%", "1", "2", "3", ".", "0", "pi", "e", "="].map((value) => (
+                          <button
+                            key={value}
+                            type="button"
+                            className={`aptitude-calculator-key ${value === "=" ? "is-equals" : ""}`}
+                            onClick={() => {
+                              if (value === "=") {
+                                try {
+                                  const expression = (calculatorExpression || "0")
+                                    .replace(/\^/g, "**")
+                                    .replace(/pi/g, "Math.PI")
+                                    .replace(/\be\b/g, "Math.E")
+                                    .replace(/sqrt\(/g, "Math.sqrt(")
+                                    .replace(/sin\(/g, "Math.sin(")
+                                    .replace(/cos\(/g, "Math.cos(")
+                                    .replace(/tan\(/g, "Math.tan(")
+                                    .replace(/log\(/g, "Math.log10(")
+                                    .replace(/ln\(/g, "Math.log(");
+                                  // eslint-disable-next-line no-new-func
+                                  const result = Function(`"use strict"; return (${expression})`)();
+                                  setCalculatorExpression(String(result));
+                                } catch {
+                                  setCalculatorExpression("Error");
+                                }
+                                return;
+                              }
+                              setCalculatorExpression((current) => (current === "Error" ? value : `${current}${value}`));
+                            }}
+                          >
+                            {value}
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          className="aptitude-calculator-key aptitude-calculator-key-wide"
+                          onClick={() => setCalculatorExpression("")}
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
+            <section className="aptitude-exam-main">
+              <div className="aptitude-exam-mainbar">
+                <div>
+                  <span className="aptitude-chip">{mockMode ? "Active Section" : "Live Section"}</span>
+                  <h2>{activeSectionTitle}</h2>
+                  <p>{codingMode ? "Solve the challenge, run your code, and submit when ready." : "Read the question carefully and move freely across the question map."}</p>
+                </div>
+              </div>
+
+              <div className="aptitude-progress-row">
+                <div className="aptitude-progress-text">
+                  {mockMode
+                    ? `${activeSectionTitle} - Question ${currentIndex + 1} of ${questions.length}`
+                    : `Question ${currentIndex + 1} of ${questions.length}`}
+                </div>
+                <div className="aptitude-progress-bar">
+                  <span style={{ width: `${((currentIndex + 1) / questions.length) * 100}%` }} />
+                </div>
+              </div>
+
+              <div className="aptitude-test-shell aptitude-exam-card">
+                <div className="aptitude-question-card">
+                  <div className="aptitude-question-meta">
+                    {codingMode ? (
+                      <>
+                        <span>{selectedCodingLevel.timerMinutes || 10} minute coding level timer</span>
+                        <span>Question {currentIndex + 1} of {questions.length}: run code, then submit to move to the next coding question</span>
+                      </>
+                    ) : (
+                      <span>Question {currentIndex + 1} of {questions.length}</span>
+                    )}
+                  </div>
+                  <div className="aptitude-question-scroll-area">
+                    <h3>{currentQuestion?.question}</h3>
+
+                    {codingMode ? (
+                      <div className="aptitude-code-workspace">
+                      <div className="aptitude-code-panel">
+                        <div className="aptitude-code-panel-header">
+                          <span className="aptitude-chip">Problem</span>
+                          <strong>{currentQuestion?.difficulty || codingLevel}</strong>
+                        </div>
+                        <p className="aptitude-code-prompt">{currentQuestion?.description || currentQuestion?.prompt}</p>
+
+                        {!!currentQuestion?.constraints?.length && (
+                          <div className="aptitude-code-block">
+                            <h4>Constraints</h4>
+                            <ul>
+                              {currentQuestion.constraints.map((item) => (
+                                <li key={item}>{item}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {!!currentQuestion?.hints?.length && (
+                          <div className="aptitude-code-block">
+                            <h4>Hints</h4>
+                            <ul>
+                              {currentQuestion.hints.map((item) => (
+                                <li key={item}>{item}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        <div className="aptitude-code-block">
+                          <h4>Examples</h4>
+                          <div className="aptitude-code-examples">
+                            {(currentQuestion?.examples || []).map((example, index) => (
+                              <div key={`example-${index}`} className="aptitude-code-example">
+                                <div><strong>Input:</strong> {example.input || "N/A"}</div>
+                                <div><strong>Output:</strong> {example.output || "N/A"}</div>
+                                {example.explanation ? <div><strong>Why:</strong> {example.explanation}</div> : null}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="aptitude-code-block">
+                          <h4>Public Test Cases</h4>
+                          <div className="aptitude-code-examples">
+                            {(currentQuestion?.public_test_cases || []).map((testCase, index) => (
+                              <div key={`public-${index}`} className="aptitude-code-example">
+                                <div><strong>Input:</strong> {testCase.input}</div>
+                                <div><strong>Expected:</strong> {testCase.expected_output}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="aptitude-editor-panel">
+                        <div className="aptitude-editor-toolbar">
+                          <div>
+                            <span className="aptitude-chip">Editor</span>
+                          </div>
+                          <select
+                            className="aptitude-language-select"
+                            value={codingLanguage}
+                            onChange={(event) => {
+                              const nextLanguage = event.target.value;
+                              setCodingLanguage(nextLanguage);
+                              if (mockMode) {
+                                patchActiveMockSection({ codingLanguage: nextLanguage });
+                              }
+                              setAnswers((currentAnswers) => {
+                                const nextAnswers = [...currentAnswers];
+                                nextAnswers[currentIndex] = nextLanguage ? getStarterCode(currentQuestion, nextLanguage) : "";
+                                if (mockMode) {
+                                  patchActiveMockSection({ answers: nextAnswers });
+                                }
+                                return nextAnswers;
+                              });
+                              setCodingRunResults((current) => {
+                                const next = [...current];
+                                next[currentIndex] = null;
+                                if (mockMode) {
+                                  patchActiveMockSection({ codingRunResults: next });
+                                }
+                                return next;
+                              });
+                              setCodingSubmitResults((current) => {
+                                const next = [...current];
+                                next[currentIndex] = null;
+                                if (mockMode) {
+                                  patchActiveMockSection({ codingSubmitResults: next });
+                                }
+                                return next;
+                              });
+                              setCodingError("");
+                            }}
+                          >
+                            <option value="">Select language</option>
+                            {runtimeLanguages.map((language) => (
+                              <option key={language.id} value={language.id}>
+                                {language.available === false ? `${language.label} (Coming soon)` : language.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {selectedRuntime?.available === false ? (
+                          <div className="aptitude-code-error">
+                            {selectedRuntime.label} will be coming soon.
+                          </div>
+                        ) : null}
+
+                        <label className="aptitude-code-answer" htmlFor="coding-response">
+                          <span>Code Editor</span>
+                          {hasSelectedCodingLanguage ? (
+                            <textarea
+                              id="coding-response"
+                              value={answers[currentIndex] || ""}
+                              onChange={(event) => handleSelectAnswer(event.target.value)}
+                              placeholder={`Complete the main logic in ${selectedRuntime?.label || "your selected language"}...`}
+                              className="aptitude-code-editor"
+                            />
+                          ) : (
+                            <div className="aptitude-code-editor aptitude-code-editor-empty">
+                              <div>
+                                <div className="aptitude-code-editor-title">Start your coding journey</div>
+                                <div className="aptitude-code-editor-copy">Choose a language to load the starter template, then begin solving the challenge with confidence.</div>
+                              </div>
+                            </div>
+                          )}
+                        </label>
+
+                        <div className="aptitude-flow-actions aptitude-coding-actions">
+                          <button
+                            type="button"
+                            className="small-start-btn aptitude-secondary-btn"
+                            disabled={isCodingBusy || !hasSelectedCodingLanguage}
+                            onClick={() => {
+                              setAnswers((currentAnswers) => {
+                                const nextAnswers = [...currentAnswers];
+                                nextAnswers[currentIndex] = getStarterCode(currentQuestion, codingLanguage);
+                                if (mockMode) {
+                                  patchActiveMockSection({ answers: nextAnswers });
+                                }
+                                return nextAnswers;
+                              });
+                              setCodingRunResults((current) => {
+                                const next = [...current];
+                                next[currentIndex] = null;
+                                if (mockMode) {
+                                  patchActiveMockSection({ codingRunResults: next });
+                                }
+                                return next;
+                              });
+                              setCodingSubmitResults((current) => {
+                                const next = [...current];
+                                next[currentIndex] = null;
+                                if (mockMode) {
+                                  patchActiveMockSection({ codingSubmitResults: next });
+                                }
+                                return next;
+                              });
+                              setCodingError("");
+                            }}
+                          >
+                            Reset Template
+                          </button>
+                          <button type="button" className="small-start-btn aptitude-secondary-btn" onClick={handleRunCode} disabled={isCodingBusy || !hasSelectedCodingLanguage || !(answers[currentIndex] || "").trim() || selectedRuntime?.available === false}>
+                            {codingRunLoading ? "Running..." : "Run Code"}
+                          </button>
+                          <button type="button" className="mock-btn aptitude-primary-btn" onClick={() => handleSubmitCode("manual")} disabled={isCodingBusy || !hasSelectedCodingLanguage || !(answers[currentIndex] || "").trim() || selectedRuntime?.available === false}>
+                            {codingSubmitLoading ? "Submitting..." : "Submit Solution"}
+                          </button>
+                        </div>
+
+                        {codingError ? <div className="aptitude-code-error">{codingError}</div> : null}
+
+                        {currentCodingRunResult ? (
+                          <div className="aptitude-code-results">
+                            <div className="aptitude-code-results-header">
+                              <strong>Run Result</strong>
+                              <span>{currentCodingRunResult.passed}/{currentCodingRunResult.total} public tests passed</span>
+                            </div>
+                            {(currentCodingRunResult.results || []).map((result) => (
+                              <div key={`run-${result.index}`} className={`aptitude-code-result-card ${result.passed ? "is-pass" : "is-fail"}`}>
+                                <strong>Test Case {result.index}</strong>
+                                <div>Input: {result.input || "N/A"}</div>
+                                <div>Expected: {result.expected_output || "N/A"}</div>
+                                <div>Actual: {result.actual_output || "N/A"}</div>
+                                {result.stderr ? <div>Error: {result.stderr}</div> : null}
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                      </div>
+                    ) : (
+                      <div className="aptitude-options-grid">
+                        {currentQuestion?.options.map((option) => (
+                          <button key={option} type="button" className={`aptitude-option ${answers[currentIndex] === option ? "is-selected" : ""}`} onClick={() => handleSelectAnswer(option)}>
+                            {option}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+            </section>
+
+            <aside className="aptitude-exam-sidebar aptitude-exam-sidebar--right">
+              <div className="aptitude-exam-panel aptitude-exam-panel--sidebar">
+                <div className="aptitude-profile-badge">
+                  <div className="aptitude-profile-icon-shell">
+                    <UserCircle2 size={52} strokeWidth={1.7} />
+                  </div>
+                  <div>
+                    <div className="aptitude-profile-name">{candidateName}</div>
+                  </div>
+                </div>
+
+                <div className="aptitude-question-legend">
+                  <div className="aptitude-question-legend-item">
+                    <span className="aptitude-legend-dot is-answered" />
+                    <small>Visited & answered</small>
+                  </div>
+                  <div className="aptitude-question-legend-item">
+                    <span className="aptitude-legend-dot is-pending" />
+                    <small>Visited, not answered</small>
+                  </div>
+                  <div className="aptitude-question-legend-item">
+                    <span className="aptitude-legend-dot is-unvisited" />
+                    <small>Not visited</small>
+                  </div>
+                </div>
+
+                <div className="aptitude-exam-panel-head">
+                  <span className="aptitude-chip">Questions</span>
+                  <strong>{activeSectionTitle}</strong>
+                </div>
+                <div className="aptitude-question-grid">
+                  {questions.map((question, index) => {
+                    const isAnswered = Boolean((answers[index] || "").trim());
+                    const isVisited = Boolean(visitedQuestions[index]);
+                    return (
+                      <button
+                        key={question.sessionId || `${activeSectionId}-${index}`}
+                        type="button"
+                        className={`aptitude-question-node ${index === currentIndex ? "is-current" : ""} ${isAnswered ? "is-answered" : ""} ${isVisited && !isAnswered ? "is-pending" : ""}`}
+                        onClick={() => {
+                          setCurrentIndex(index);
+                          if (mockMode) {
+                            patchActiveMockSection({ currentIndex: index, visitedQuestions });
+                          }
+                        }}
+                      >
+                        {index + 1}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="aptitude-sidebar-actions">
+                  {codingMode ? (
+                    <>
+                      <button type="button" className="mock-btn aptitude-secondary-btn aptitude-sidebar-btn" onClick={handlePreviousQuestion} disabled={currentIndex === 0}>
+                        Previous
+                      </button>
+                      <button type="button" className="mock-btn aptitude-secondary-btn aptitude-sidebar-btn" onClick={handleNextQuestion} disabled={currentIndex === questions.length - 1}>
+                        Next
+                      </button>
+                      <button type="button" className="mock-btn aptitude-primary-btn aptitude-sidebar-btn" onClick={handleEndExam}>
+                        Submit
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                    <button type="button" className="mock-btn aptitude-secondary-btn aptitude-sidebar-btn" onClick={handlePreviousQuestion} disabled={currentIndex === 0}>
+                      Previous
+                    </button>
+                    <button type="button" className="mock-btn aptitude-secondary-btn aptitude-sidebar-btn" onClick={handleNextQuestion} disabled={currentIndex === questions.length - 1}>
+                      Next
+                    </button>
+                    <button type="button" className="mock-btn aptitude-primary-btn aptitude-sidebar-btn" onClick={handleEndExam}>
+                      Submit
+                    </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            </aside>
+          </main>
+        )}
+      </div>
+    );
   }
 
   return (
     <div className="mock-page reveal">
+      {startingTest ? (
+        <div className="aptitude-startup-overlay" ref={startupOverlayRef} role="status" aria-live="polite" aria-busy="true">
+          <div className="aptitude-startup-backdrop-orb aptitude-startup-backdrop-orb-one" />
+          <div className="aptitude-startup-backdrop-orb aptitude-startup-backdrop-orb-two" />
+          <div className="aptitude-startup-modal">
+            <div className="aptitude-startup-illustration" aria-hidden="true">
+              <div className="aptitude-startup-ring aptitude-startup-ring-one" />
+              <div className="aptitude-startup-ring aptitude-startup-ring-two" />
+              <div className="aptitude-startup-logo-shell">
+                <img src={logo} alt="" className="aptitude-startup-logo" />
+              </div>
+            </div>
+            <div className="aptitude-startup-copy">
+              <div className={`aptitude-startup-line ${startupMessageVisible ? "is-visible" : ""}`}>
+                {startupCountdown == null ? startupMessage : "Launching your exam workspace..."}
+              </div>
+              <div className="aptitude-startup-timer-pill">
+                <span>{startupCountdown == null ? "Interview starts after preparation" : "Interview starts in"}</span>
+                <strong>{startupCountdown == null ? "Preparing..." : `00:0${Math.max(0, startupCountdown)}`}</strong>
+              </div>
+              <button type="button" className="mock-btn aptitude-secondary-btn aptitude-startup-cancel-btn" onClick={cancelStartupLaunch}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <MiniNavbar />
 
       <div className="mock-hero aptitude-hero" style={{ background: "linear-gradient(90deg, #0f766e 0%, #14b8a6 55%, #67e8f9 100%)" }}>
@@ -875,35 +2702,37 @@ function AptitudeTest() {
         <img src={aptitudeHero} alt="Aptitude Test" className="mock-hero-img" />
       </div>
 
-      {isOverviewStage && (
-        <>
-          <div className="mock-section">
-            <div className="section-header-row" style={{ justifyContent: "flex-end", display: "none" }}>
-              <button className="small-start-btn" onClick={handleOpenSetup} disabled={startingTest}>Start Aptitude</button>
+      {isLandingStage && (
+        <div className="mock-section">
+          <div className="section-header-row" style={{ justifyContent: "flex-end", display: "none" }}>
+            <button className="small-start-btn" onClick={handleOpenSetup} disabled={startingTest}>Start Aptitude</button>
+          </div>
+          <div className="aptitude-info-grid">
+            <div className="aptitude-info-card aptitude-info-card-learn">
+              <div className="aptitude-info-card-tag aptitude-info-card-tag-warm">What you'll learn</div>
+              <ul>
+                <li>Quantitative, reasoning, and verbal problem solving with timed MCQ practice</li>
+                <li>Coding challenges with selectable level, multiple AI-generated questions, and runnable code</li>
+                <li>Passed test case counts and AI code review after submission</li>
+              </ul>
             </div>
-            <div className="aptitude-info-grid">
-              <div className="aptitude-info-card aptitude-info-card-learn">
-                <div className="aptitude-info-card-tag aptitude-info-card-tag-warm">What you'll learn</div>
-                <ul>
-                  <li>Quantitative, reasoning, and verbal problem solving with timed MCQ practice</li>
-                  <li>Coding challenges with selectable level, multiple AI-generated questions, and runnable code</li>
-                  <li>Passed test case counts and AI code review after submission</li>
-                </ul>
-              </div>
-              <div className="aptitude-info-card aptitude-info-card-types">
-                <div className="aptitude-info-card-tag aptitude-info-card-tag-strong">Question types</div>
-                <ul>
-                  <li>MCQ sections use 4-option questions with 60 seconds per question</li>
-                  <li>The coding section uses a split problem/editor layout like coding platforms</li>
-                  <li>The editor starts with a starter template, not a solved answer</li>
-                </ul>
-              </div>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'center', marginTop: '22px' }}>
-              <button className="small-start-btn" onClick={handleOpenSetup} disabled={startingTest}>Start Aptitude</button>
+            <div className="aptitude-info-card aptitude-info-card-types">
+              <div className="aptitude-info-card-tag aptitude-info-card-tag-strong">Question types</div>
+              <ul>
+                <li>MCQ sections use 4-option questions, and Computer Fundamentals uses 30 seconds per question</li>
+                <li>The coding section uses a split problem/editor layout like coding platforms</li>
+                <li>The editor starts with a starter template, not a solved answer</li>
+              </ul>
             </div>
           </div>
+          <div style={{ display: "flex", justifyContent: "center", marginTop: "22px" }}>
+            <button className="small-start-btn" onClick={handleOpenSetup} disabled={startingTest}>Start Aptitude</button>
+          </div>
+        </div>
+      )}
 
+      {isSetupStage && (
+        <>
           <div className="mock-section" ref={setupSectionRef}>
             <div className="aptitude-flow-card">
               <div className="aptitude-flow-header">
@@ -914,19 +2743,22 @@ function AptitudeTest() {
                 <div className="aptitude-timer-preview">
                   <span>Total time</span>
                   <strong>{totalMinutes} min</strong>
-                  <small>{codingMode ? `${configuredQuestionCount} coding questions` : `${configuredQuestionCount} questions x 60 sec`}</small>
+                  <small>{mockMode ? `${configuredQuestionCount} total mock questions` : codingMode ? `${configuredQuestionCount} coding questions` : `${configuredQuestionCount} questions x ${secondsPerQuestion} sec`}</small>
                 </div>
               </div>
 
               <div className="aptitude-setup-grid">
-                {SECTION_OPTIONS.map((section) => (
+                {getOrderedSetupSections().map((section) => (
                   <button
                   key={section.id}
                   type="button"
-                  className={`aptitude-section-card ${selectedSection === section.id ? "is-active" : ""}`}
+                  className={`aptitude-section-card aptitude-section-card--${section.id} ${selectedSection === section.id ? "is-active" : ""}`}
                   disabled={startingTest}
                   onClick={() => setSelectedSection(section.id)}
                 >
+                    {selectedSection === section.id ? (
+                      <div className="aptitude-section-selected-pill">Selected</div>
+                    ) : null}
                     <strong>{section.title}</strong>
                     <span>{section.description}</span>
                   </button>
@@ -937,17 +2769,17 @@ function AptitudeTest() {
                 <div className="aptitude-count-card">
                 <div className="aptitude-count-copy">
                   <span className="aptitude-chip">Coding setup</span>
-                  <h3>{codingLevel.charAt(0).toUpperCase() + codingLevel.slice(1)} level, {questionCount} questions</h3>
+                  <h3>{selectedCodingLevel.title} level, {questionCount} questions</h3>
                   <div className="aptitude-tip-row">
                     <span
                       className="aptitude-tip-sign"
-                      title="Choose a coding difficulty level, then set how many coding questions you want in this session from 5 to 20."
-                      aria-label="Tip: Choose a coding difficulty level, then set how many coding questions you want in this session from 5 to 20."
+                      title="Choose Basic, Advanced, or Basic + Advanced, then set how many coding questions you want in this session from 5 to 20. Advanced mixes medium and hard questions, while Basic + Advanced includes both tracks."
+                      aria-label="Tip: Choose Basic, Advanced, or Basic plus Advanced, then set how many coding questions you want in this session from 5 to 20. Advanced mixes medium and hard questions, while Basic plus Advanced includes both tracks."
                       tabIndex={0}
                     >
                       <Info size={16} strokeWidth={2.2} />
                     </span>
-                    <p>Choose a coding difficulty level, then set how many coding questions you want in this session from 5 to 20.</p>
+                    <p>Choose Basic, Advanced, or Basic + Advanced, then set how many coding questions you want in this session from 5 to 20. Advanced mixes medium and hard questions, while Basic + Advanced includes both tracks.</p>
                   </div>
                 </div>
                   <div className="aptitude-count-controls">
@@ -968,6 +2800,51 @@ function AptitudeTest() {
                       <button type="button" onClick={() => setQuestionCount((current) => Math.max(5, current - 1))} disabled={startingTest}>-</button>
                       <div>{questionCount}</div>
                       <button type="button" onClick={() => setQuestionCount((current) => Math.min(20, current + 1))} disabled={startingTest}>+</button>
+                    </div>
+                  </div>
+                </div>
+              ) : mockMode ? (
+                <div className="aptitude-count-card">
+                  <div className="aptitude-count-copy">
+                    <span className="aptitude-chip">Mock length</span>
+                    <h3>{configuredQuestionCount} questions selected</h3>
+                    <p>Choose a full mock size. Each mock includes fixed section-wise distribution and 2 coding questions.</p>
+                  </div>
+                  <div className="aptitude-count-controls">
+                    <input
+                      type="range"
+                      min="0"
+                      max={APTITUDE_MOCK_COUNT_OPTIONS.length - 1}
+                      step="1"
+                      value={Math.max(0, APTITUDE_MOCK_COUNT_OPTIONS.indexOf(configuredQuestionCount))}
+                      disabled={startingTest}
+                      onChange={(event) => {
+                        const nextIndex = Number(event.target.value);
+                        setQuestionCount(APTITUDE_MOCK_COUNT_OPTIONS[nextIndex] || APTITUDE_MOCK_COUNT_OPTIONS[0]);
+                      }}
+                    />
+                    <div className="aptitude-count-stepper">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const currentIndex = Math.max(0, APTITUDE_MOCK_COUNT_OPTIONS.indexOf(configuredQuestionCount));
+                          setQuestionCount(APTITUDE_MOCK_COUNT_OPTIONS[Math.max(0, currentIndex - 1)]);
+                        }}
+                        disabled={startingTest || configuredQuestionCount === APTITUDE_MOCK_COUNT_OPTIONS[0]}
+                      >
+                        -
+                      </button>
+                      <div>{configuredQuestionCount}</div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const currentIndex = Math.max(0, APTITUDE_MOCK_COUNT_OPTIONS.indexOf(configuredQuestionCount));
+                          setQuestionCount(APTITUDE_MOCK_COUNT_OPTIONS[Math.min(APTITUDE_MOCK_COUNT_OPTIONS.length - 1, currentIndex + 1)]);
+                        }}
+                        disabled={startingTest || configuredQuestionCount === APTITUDE_MOCK_COUNT_OPTIONS[APTITUDE_MOCK_COUNT_OPTIONS.length - 1]}
+                      >
+                        +
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -1028,6 +2905,7 @@ function AptitudeTest() {
                   )}
                 </button>
               </div>
+              {startError ? <div className="aptitude-code-error">{startError}</div> : null}
             </div>
           </div>
         </>
@@ -1039,17 +2917,21 @@ function AptitudeTest() {
             <div className="aptitude-test-topbar">
               <div>
                 <span className="aptitude-chip">Live test</span>
-                <h2>{selectedSectionConfig.title}</h2>
+                <h2>{activeSectionTitle}</h2>
               </div>
               <div className="aptitude-timer-live">
                 <span>Time left</span>
                 <strong>{formatTime(timeLeft)}</strong>
-                <small>{answeredCount}/{questions.length} answered</small>
+                <small>{answeredCount}/{questions.length} answered{mockMode ? ` • Section ${mockSectionIndex + 1}/${mockSections.length}` : ""}</small>
               </div>
             </div>
 
             <div className="aptitude-progress-row">
-              <div className="aptitude-progress-text">Question {currentIndex + 1} of {questions.length}</div>
+              <div className="aptitude-progress-text">
+                {mockMode
+                  ? `${activeSectionTitle} - Question ${currentIndex + 1} of ${questions.length}`
+                  : `Question ${currentIndex + 1} of ${questions.length}`}
+              </div>
               <div className="aptitude-progress-bar">
                 <span style={{ width: `${((currentIndex + 1) / questions.length) * 100}%` }} />
               </div>
@@ -1059,12 +2941,12 @@ function AptitudeTest() {
               <div className="aptitude-question-meta">
                 {codingMode ? (
                   <>
-                    <span>{CODING_LEVELS.find((level) => level.id === codingLevel)?.timerMinutes || 10} minute coding level timer</span>
+                    <span>{selectedCodingLevel.timerMinutes || 10} minute coding level timer</span>
                     <span>Question {currentIndex + 1} of {questions.length}: run code, then submit to move to the next coding question</span>
                   </>
                 ) : (
                   <>
-                    <span>60 sec per question</span>
+                    <span>{secondsPerQuestion} sec per question</span>
                     <span>Total timer is running continuously</span>
                   </>
                 )}
@@ -1139,19 +3021,31 @@ function AptitudeTest() {
                         onChange={(event) => {
                           const nextLanguage = event.target.value;
                           setCodingLanguage(nextLanguage);
+                          if (mockMode) {
+                            patchActiveMockSection({ codingLanguage: nextLanguage });
+                          }
                           setAnswers((currentAnswers) => {
                             const nextAnswers = [...currentAnswers];
                             nextAnswers[currentIndex] = nextLanguage ? getStarterCode(currentQuestion, nextLanguage) : "";
+                            if (mockMode) {
+                              patchActiveMockSection({ answers: nextAnswers });
+                            }
                             return nextAnswers;
                           });
                           setCodingRunResults((current) => {
                             const next = [...current];
                             next[currentIndex] = null;
+                            if (mockMode) {
+                              patchActiveMockSection({ codingRunResults: next });
+                            }
                             return next;
                           });
                           setCodingSubmitResults((current) => {
                             const next = [...current];
                             next[currentIndex] = null;
+                            if (mockMode) {
+                              patchActiveMockSection({ codingSubmitResults: next });
+                            }
                             return next;
                           });
                           setCodingError("");
@@ -1218,16 +3112,25 @@ function AptitudeTest() {
                           setAnswers((currentAnswers) => {
                             const nextAnswers = [...currentAnswers];
                             nextAnswers[currentIndex] = getStarterCode(currentQuestion, codingLanguage);
+                            if (mockMode) {
+                              patchActiveMockSection({ answers: nextAnswers });
+                            }
                             return nextAnswers;
                           });
                           setCodingRunResults((current) => {
                             const next = [...current];
                             next[currentIndex] = null;
+                            if (mockMode) {
+                              patchActiveMockSection({ codingRunResults: next });
+                            }
                             return next;
                           });
                           setCodingSubmitResults((current) => {
                             const next = [...current];
                             next[currentIndex] = null;
+                            if (mockMode) {
+                              patchActiveMockSection({ codingSubmitResults: next });
+                            }
                             return next;
                           });
                           setCodingError("");
@@ -1279,17 +3182,22 @@ function AptitudeTest() {
               <>
                 <div className="aptitude-question-map">
                   {questions.map((question, index) => (
-                    <button key={question.sessionId} type="button" className={`aptitude-map-dot ${index === currentIndex ? "is-current" : ""} ${answers[index] ? "is-answered" : ""}`} onClick={() => setCurrentIndex(index)}>
+                    <button key={question.sessionId} type="button" className={`aptitude-map-dot ${index === currentIndex ? "is-current" : ""} ${answers[index] ? "is-answered" : ""}`} onClick={() => {
+                      setCurrentIndex(index);
+                      if (mockMode) {
+                        patchActiveMockSection({ currentIndex: index });
+                      }
+                    }}>
                       {index + 1}
                     </button>
                   ))}
                 </div>
 
                 <div className="aptitude-flow-actions">
-                  <button type="button" className="small-start-btn aptitude-secondary-btn" onClick={() => setCurrentIndex((current) => Math.max(0, current - 1))} disabled={currentIndex === 0}>Previous</button>
+                  <button type="button" className="small-start-btn aptitude-secondary-btn" onClick={handlePreviousQuestion} disabled={currentIndex === 0}>Previous</button>
                   <div className="aptitude-inline-actions">
                     <button type="button" className="small-start-btn aptitude-secondary-btn" onClick={() => handleFinishMcq("manual")}>Submit Now</button>
-                    <button type="button" className="mock-btn aptitude-primary-btn" onClick={() => setCurrentIndex((current) => Math.min(questions.length - 1, current + 1))} disabled={currentIndex === questions.length - 1}>Next Question</button>
+                    <button type="button" className="mock-btn aptitude-primary-btn" onClick={handleNextQuestion} disabled={currentIndex === questions.length - 1}>Next Question</button>
                   </div>
                 </div>
               </>
@@ -1298,14 +3206,22 @@ function AptitudeTest() {
         </div>
       )}
 
-      {stage === "summary" && summary && (
+      {!examOnly && stage === "summary" && summary && (
         <div className="mock-section">
           <div className="aptitude-flow-card aptitude-summary-shell">
             <div className="aptitude-summary-hero">
               <div>
-                <span className="aptitude-chip">Summary</span>
-                <h2>{summary.autoSubmitted ? "Time is over. Your test was auto-submitted." : "Your test summary is ready."}</h2>
-                <p>{summary.mode === "coding" ? "Below is your coding submission, passed test cases, and AI analysis." : "Below is the answer review with your chosen option and the correct answer for every question."}</p>
+                <span className="aptitude-chip">{showDetailedResults ? "Summary" : "Test Complete"}</span>
+                <h2>{showDetailedResults ? (summary.autoSubmitted ? "Time is over. Your test was auto-submitted." : "Your test summary is ready.") : "Thank you. Your test is over."}</h2>
+                <p>
+                  {showDetailedResults
+                    ? (summary.mode === "coding"
+                      ? "Below is your coding submission, passed test cases, and AI analysis."
+                      : summary.mode === "mock"
+                      ? "Below is your full aptitude mock review, grouped section by section in the same order as the live test."
+                      : "Below is the answer review with your chosen option and the correct answer for every question.")
+                    : "Your submission has been recorded successfully. Review the counters below, then open the detailed results whenever you are ready."}
+                </p>
               </div>
               <div className="aptitude-summary-score">
                 <span>{summary.mode === "coding" ? "Passed" : "Score"}</span>
@@ -1314,7 +3230,97 @@ function AptitudeTest() {
               </div>
             </div>
 
-            {summary.mode === "coding" ? (
+            {!showDetailedResults ? (
+              <>
+                <div className="aptitude-summary-counter-grid">
+                  <div className="aptitude-summary-counter-card">
+                    <span>Not Visited</span>
+                    <strong>{summary.notVisitedCount || 0}</strong>
+                  </div>
+                  <div className="aptitude-summary-counter-card is-success">
+                    <span>Answered</span>
+                    <strong>{summary.answeredCount || 0}</strong>
+                  </div>
+                  <div className="aptitude-summary-counter-card is-warning">
+                    <span>Not Answered</span>
+                    <strong>{summary.notAnsweredCount || 0}</strong>
+                  </div>
+                </div>
+
+                <div className="aptitude-summary-intro-actions">
+                  <button type="button" className="mock-btn aptitude-primary-btn" onClick={() => setShowDetailedResults(true)}>
+                    Show Results
+                  </button>
+                </div>
+              </>
+            ) : summary.mode === "mock" ? (
+              <div className="aptitude-review-list">
+                {(summary.sections || []).map((section, sectionIndex) => (
+                  <article key={`mock-section-${section.sectionId}-${sectionIndex}`} className="aptitude-review-card">
+                    <div className="aptitude-review-top">
+                      <span>Section {sectionIndex + 1}</span>
+                      <strong>{section.title}</strong>
+                    </div>
+                    <div className="aptitude-review-answer-grid">
+                      <div>
+                        <span>Score / passed</span>
+                        <p>{section.score}/{section.totalQuestions}</p>
+                      </div>
+                      <div>
+                        <span>Answered</span>
+                        <p>{section.answeredCount}</p>
+                      </div>
+                    </div>
+                    {section.mode === "coding" ? (
+                      <div className="aptitude-review-list">
+                        {(section.codingItems || []).map((item, index) => (
+                          <article key={`mock-coding-${sectionIndex}-${index}`} className="aptitude-review-card is-coding">
+                            <div className="aptitude-review-top">
+                              <span>Coding Question {index + 1}</span>
+                              <strong>{item.execution?.passed || 0}/{item.execution?.total || 0} tests passed</strong>
+                            </div>
+                            <h3>{item.challenge?.title}</h3>
+                            <p className="aptitude-review-prompt">{item.challenge?.description}</p>
+                            <div className="aptitude-review-answer-grid">
+                              <div>
+                                <span>Language</span>
+                                <p>{item.language || "N/A"}</p>
+                              </div>
+                              <div>
+                                <span>AI review</span>
+                                <p>{item.review?.summary || "No AI review available."}</p>
+                              </div>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="aptitude-review-list">
+                        {(section.items || []).map((item, index) => (
+                          <article key={`mock-mcq-${sectionIndex}-${item.sessionId || index}`} className={`aptitude-review-card ${item.isCorrect ? "is-correct" : "is-incorrect"}`}>
+                            <div className="aptitude-review-top">
+                              <span>Question {index + 1}</span>
+                              <strong>{item.isCorrect ? "Correct" : "Review needed"}</strong>
+                            </div>
+                            <h3>{item.question}</h3>
+                            <div className="aptitude-review-answer-grid">
+                              <div>
+                                <span>Your answer</span>
+                                <p>{item.selectedAnswer}</p>
+                              </div>
+                              <div>
+                                <span>Correct answer</span>
+                                <p>{item.correctAnswer}</p>
+                              </div>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    )}
+                  </article>
+                ))}
+              </div>
+            ) : summary.mode === "coding" ? (
               <div className="aptitude-review-list">
                 {(summary.codingItems || []).map((item, index) => (
                   <article key={`coding-summary-${index}`} className="aptitude-review-card is-coding">
@@ -1406,10 +3412,19 @@ function AptitudeTest() {
               </>
             )}
 
-            <div className="aptitude-flow-actions">
-              <button type="button" className="small-start-btn aptitude-secondary-btn" onClick={handleOpenSetup}>Practice Again</button>
-              <button type="button" className="mock-btn aptitude-primary-btn" onClick={() => setStage("landing")}>Back to Overview</button>
-            </div>
+            {showDetailedResults ? (
+              <div className="aptitude-flow-actions">
+                <button type="button" className="small-start-btn aptitude-secondary-btn aptitude-summary-btn" onClick={handleOpenSetup}>Practice Again</button>
+                <button type="button" className="small-start-btn aptitude-secondary-btn aptitude-summary-btn" onClick={handleBackHome}>Back to Home</button>
+                <button type="button" className="mock-btn aptitude-primary-btn aptitude-summary-btn" onClick={() => {
+                  if (examOnly) {
+                    handleOpenSetup();
+                    return;
+                  }
+                  setStage("landing");
+                }}>Back to Overview</button>
+              </div>
+            ) : null}
           </div>
         </div>
       )}

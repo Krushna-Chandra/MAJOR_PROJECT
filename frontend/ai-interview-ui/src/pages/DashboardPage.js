@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import {
@@ -10,7 +10,6 @@ import {
   Lightbulb,
   LineChart as LineChartIcon,
   MessagesSquare,
-  Rocket,
   Sparkles,
   Target,
   TrendingDown,
@@ -24,6 +23,15 @@ const API_BASE_URL = process.env.REACT_APP_API_URL || "http://127.0.0.1:8000";
 const CHART_WIDTH = 560;
 const LINE_CHART_HEIGHT = 240;
 const BAR_CHART_HEIGHT = 240;
+const RESUME_ANALYZER_RESULT_KEY = "resumeAnalyzerResult";
+
+const CATEGORY_DEFINITIONS = [
+  { key: "technical", label: "Technical", shortLabel: "Tech", color: "#2563eb", softColor: "rgba(37, 99, 235, 0.12)" },
+  { key: "behavioral", label: "Behavioral / HR", shortLabel: "HR", color: "#f97316", softColor: "rgba(249, 115, 22, 0.12)" },
+  { key: "mock", label: "Mock", shortLabel: "Mock", color: "#7c3aed", softColor: "rgba(124, 58, 237, 0.12)" },
+  { key: "resume", label: "Resume", shortLabel: "Resume", color: "#059669", softColor: "rgba(5, 150, 105, 0.12)" },
+  { key: "aptitude", label: "Aptitude / Coding", shortLabel: "Code", color: "#0891b2", softColor: "rgba(8, 145, 178, 0.12)" },
+];
 
 function clampNumber(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -41,11 +49,96 @@ function inferSelectedMode(report) {
   return report?.context?.primary_language ? "language" : "role";
 }
 
-function inferExperience(report) {
-  const raw = safeText(report?.context?.experience).toLowerCase();
-  if (raw.includes("mid")) return "Mid-level";
-  if (raw.includes("exp") || raw.includes("senior")) return "Experienced";
-  return "Fresher";
+function getResumeAnalyzerActivity() {
+  try {
+    const payload = JSON.parse(sessionStorage.getItem(RESUME_ANALYZER_RESULT_KEY) || "null");
+    if (payload?.resumeDataUrl || payload?.fileName || payload?.result) {
+      return {
+        count: 1,
+        fileName: safeText(payload.fileName || "Resume analyzed"),
+        createdAt: safeText(payload.analyzedAt || payload.createdAt),
+      };
+    }
+  } catch {}
+
+  return { count: 0, fileName: "", createdAt: "" };
+}
+
+function classifyReportCategory(report) {
+  const context = report?.context || {};
+  const source = safeText([
+    context.category,
+    context.selected_mode,
+    context.practice_type,
+    context.job_role,
+    context.primary_language,
+    context.config_mode,
+  ]).toLowerCase();
+
+  if (source.includes("resume")) return "resume";
+  if (source.includes("aptitude") || source.includes("coding") || source.includes("code") || source.includes("challenge")) return "aptitude";
+  if (source.includes("mock")) return "mock";
+  if (source.includes("behav") || source.includes("hr")) return "behavioral";
+  return "technical";
+}
+
+function buildCategoryStats(reports = [], resumeAnalyzerActivity = { count: 0 }) {
+  const statsMap = CATEGORY_DEFINITIONS.reduce((accumulator, category) => {
+    accumulator[category.key] = {
+      ...category,
+      average: 0,
+      best: 0,
+      count: 0,
+      scores: [],
+      total: 0,
+    };
+    return accumulator;
+  }, {});
+
+  reports.forEach((report) => {
+    const key = classifyReportCategory(report);
+    const bucket = statsMap[key] || statsMap.technical;
+    const score = safeScore(report.overall_score);
+    bucket.count += 1;
+    bucket.total += score;
+    bucket.best = Math.max(bucket.best, score);
+    bucket.scores.push(score);
+  });
+
+  if (resumeAnalyzerActivity.count && !statsMap.resume.count) {
+    statsMap.resume.count = resumeAnalyzerActivity.count;
+  }
+
+  return CATEGORY_DEFINITIONS.map((category) => {
+    const bucket = statsMap[category.key];
+    return {
+      ...bucket,
+      average: bucket.scores.length ? Math.round(bucket.total / bucket.scores.length) : 0,
+    };
+  });
+}
+
+function getConsistencyModel(scores = []) {
+  if (scores.length < 2) {
+    return {
+      label: "Need more data",
+      score: 0,
+      summary: "Complete two or more sessions to measure score stability.",
+    };
+  }
+
+  const average = scores.reduce((sum, score) => sum + score, 0) / scores.length;
+  const variance = scores.reduce((sum, score) => sum + Math.pow(score - average, 2), 0) / scores.length;
+  const deviation = Math.sqrt(variance);
+  const score = clampNumber(Math.round(100 - deviation * 2), 0, 100);
+
+  return {
+    label: score >= 75 ? "Stable" : score >= 50 ? "Variable" : "Volatile",
+    score,
+    summary: score >= 75
+      ? "Your scores are staying in a reliable range."
+      : "Your scores are moving noticeably between sessions.",
+  };
 }
 
 function countTopItems(items = [], limit = 3) {
@@ -160,23 +253,6 @@ function buildRecommendationModel(reports = [], topicPerformance = []) {
     },
     plan,
     strengths: topStrengths,
-  };
-}
-
-function buildInstructionState(nextInterview, report) {
-  if (!nextInterview || !report) return null;
-
-  return {
-    category: nextInterview.category,
-    selectedMode: nextInterview.mode,
-    selectedOptions: [nextInterview.option],
-    experience: inferExperience(report),
-    configMode: "question",
-    questionCount: 10,
-    customQuestionCount: null,
-    practiceType: nextInterview.practiceType,
-    interviewModeTime: nextInterview.practiceType === "interview" ? 10 : null,
-    timeModeInterval: null,
   };
 }
 
@@ -425,6 +501,43 @@ function BarChart({ data = [] }) {
   );
 }
 
+function DistributionMeter({ data = [], total = 0, score = 0 }) {
+  const visibleData = data.filter((item) => item.count > 0);
+  let cursor = 0;
+  const segments = visibleData.map((item) => {
+    const start = cursor;
+    const end = cursor + (item.count / Math.max(total, 1)) * 100;
+    cursor = end;
+    return `${item.color} ${start}% ${end}%`;
+  });
+  const meterBackground = segments.length
+    ? `conic-gradient(${segments.join(", ")}, #e2e8f0 ${cursor}% 100%)`
+    : "conic-gradient(#e2e8f0 0% 100%)";
+
+  return (
+    <div className="dashboard-distribution">
+      <div className="dashboard-distribution-meter" style={{ background: meterBackground }}>
+        <div className="dashboard-distribution-core">
+          <span>Readiness</span>
+          <strong>{score}%</strong>
+        </div>
+      </div>
+
+      <div className="dashboard-distribution-list">
+        {data.map((item) => (
+          <div key={item.key} className="dashboard-distribution-row">
+            <span className="dashboard-distribution-dot" style={{ background: item.color }} />
+            <div>
+              <strong>{item.label}</strong>
+              <span>{item.count} tracked</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function MetricCard({ eyebrow, title, value, trend, meta, icon: Icon, tone }) {
   const positive = trend >= 0;
   return (
@@ -463,73 +576,89 @@ function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    const loadDashboard = async () => {
-      setLoading(true);
-      setError("");
-      try {
-        const token = localStorage.getItem("token");
-        const response = await axios.get(`${API_BASE_URL}/interview-reports`, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        });
+  const loadDashboard = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const token = localStorage.getItem("token");
 
-        const normalizedReports = Array.isArray(response.data?.reports)
-          ? response.data.reports.map((item) => normalizeReport(item))
-          : [];
-
-        const scores = normalizedReports.map((item) => safeScore(item.overall_score));
-        const topicMap = new Map();
-
-        normalizedReports.forEach((item) => {
-          const topic = safeText(item.context?.job_role || item.context?.primary_language || item.context?.category || "General");
-          const current = topicMap.get(topic) || [];
-          current.push(safeScore(item.overall_score));
-          topicMap.set(topic, current);
-        });
-
-        const topicPerformance = Array.from(topicMap.entries())
-          .slice(0, 6)
-          .map(([topic, values]) => ({
-            topic,
-            value: Math.round(values.reduce((sum, score) => sum + score, 0) / Math.max(values.length, 1)),
-          }));
-
-        setReports(normalizedReports);
-        setMetrics({
-          totalInterviews: normalizedReports.length,
-          avgScore: scores.length ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length) : 0,
-          bestScore: scores.length ? Math.max(...scores) : 0,
-          accuracyTrend: scores.length ? scores.slice(0, 9).reverse() : [],
-          topicPerformance,
-        });
-      } catch (requestError) {
-        setError(
-          safeErrorText(
-            requestError.response?.data?.detail ||
-            requestError.response?.data ||
-            requestError.message ||
-            "Failed to load dashboard metrics."
-          )
-        );
-        setMetrics({
-          totalInterviews: 0,
-          avgScore: 0,
-          bestScore: 0,
-          accuracyTrend: [],
-          topicPerformance: [],
-        });
-        setReports([]);
-      } finally {
-        setLoading(false);
+      if (!token) {
+        navigate("/auth", { replace: true });
+        return;
       }
-    };
 
+      const response = await axios.get(`${API_BASE_URL}/interview-reports`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const normalizedReports = Array.isArray(response.data?.reports)
+        ? response.data.reports.map((item) => normalizeReport(item))
+        : [];
+
+      const scores = normalizedReports.map((item) => safeScore(item.overall_score));
+      const topicMap = new Map();
+
+      normalizedReports.forEach((item) => {
+        const topic = safeText(item.context?.job_role || item.context?.primary_language || item.context?.category || "General");
+        const current = topicMap.get(topic) || [];
+        current.push(safeScore(item.overall_score));
+        topicMap.set(topic, current);
+      });
+
+      const topicPerformance = Array.from(topicMap.entries())
+        .slice(0, 6)
+        .map(([topic, values]) => ({
+          topic,
+          value: Math.round(values.reduce((sum, score) => sum + score, 0) / Math.max(values.length, 1)),
+        }));
+
+      setReports(normalizedReports);
+      setMetrics({
+        totalInterviews: normalizedReports.length,
+        avgScore: scores.length ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length) : 0,
+        bestScore: scores.length ? Math.max(...scores) : 0,
+        accuracyTrend: scores.length ? scores.slice(0, 9).reverse() : [],
+        topicPerformance,
+      });
+    } catch (requestError) {
+      const status = requestError.response?.status;
+      if (status === 401 || status === 403) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("user");
+        navigate("/auth", { replace: true });
+        return;
+      }
+
+      setError(
+        safeErrorText(
+          requestError.response?.data?.detail ||
+          requestError.response?.data ||
+          requestError.message ||
+          "Failed to load dashboard metrics."
+        )
+      );
+      setMetrics({
+        totalInterviews: 0,
+        avgScore: 0,
+        bestScore: 0,
+        accuracyTrend: [],
+        topicPerformance: [],
+      });
+      setReports([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [navigate]);
+
+  useEffect(() => {
     loadDashboard();
-  }, []);
+  }, [loadDashboard]);
 
   const dashboardView = useMemo(() => {
     const accuracyTrend = metrics.accuracyTrend || [];
     const topicPerformance = metrics.topicPerformance || [];
+    const resumeAnalyzerActivity = getResumeAnalyzerActivity();
+    const categoryStats = buildCategoryStats(reports, resumeAnalyzerActivity);
     const storedUser = getStoredUserProfile();
     const userName = getUserDisplayName();
     const greeting = getDashboardWelcomeState();
@@ -541,32 +670,18 @@ function DashboardPage() {
     const completionTrend = accuracyTrend.length > 1 ? Math.round(((accuracyTrend.length - 1) / accuracyTrend.length) * 100) : 0;
     const improvementRate = Math.min(100, Math.round((metrics.avgScore || 0) * 1.05));
     const improvementTrend = latestScore - previousScore;
-
-    const interviewMix = reports.reduce(
-      (accumulator, report) => {
-        const categorySource = safeText(
-          report.context?.category || report.context?.selected_mode || report.context?.practice_type || ""
-        ).toLowerCase();
-
-        if (categorySource.includes("behav") || categorySource.includes("hr")) {
-          accumulator.behavioral += 1;
-        } else if (categorySource.includes("resume") || categorySource.includes("library") || categorySource.includes("aptitude")) {
-          accumulator.library += 1;
-        } else {
-          accumulator.technical += 1;
-        }
-
-        return accumulator;
-      },
-      { behavioral: 0, library: 0, technical: 0 }
-    );
-
-    const totalMix = interviewMix.technical + interviewMix.behavioral + interviewMix.library;
-    const topTopics = topicPerformance.slice(0, 4).map((item, index) => ({
-      ...item,
-      progress: clampNumber(item.value, 0, 100),
-      tone: ["sky", "indigo", "violet", "cyan"][index % 4],
-    }));
+    const totalMix = categoryStats.reduce((sum, item) => sum + item.count, 0);
+    const categoryPerformance = categoryStats
+      .filter((item) => item.scores.length)
+      .map((item) => ({ ...item, topic: item.shortLabel, value: item.average }));
+    const bestCategory = [...categoryStats].sort((left, right) => right.average - left.average || right.count - left.count)[0];
+    const weakestCategory = [...categoryStats]
+      .filter((item) => item.scores.length)
+      .sort((left, right) => left.average - right.average)[0];
+    const consistency = getConsistencyModel(accuracyTrend);
+    const recentImprovement = accuracyTrend.length > 1
+      ? accuracyTrend[accuracyTrend.length - 1] - accuracyTrend[accuracyTrend.length - 2]
+      : 0;
     const profileSummary = {
       avatar: safeText(storedUser?.profile_image),
       email: safeText(storedUser?.email),
@@ -578,7 +693,6 @@ function DashboardPage() {
       subtitle: (metrics.totalInterviews || 0) > 0 ? "Interview-ready candidate" : "Getting started",
     };
     const recommendation = buildRecommendationModel(reports, topicPerformance);
-    const recommendedState = buildInstructionState(recommendation.nextInterview, latestReport);
 
     const statCards = [
       {
@@ -643,34 +757,40 @@ function DashboardPage() {
     return {
       accuracyTrend,
       greeting,
+      bestCategory,
+      categoryPerformance,
+      categoryStats,
+      consistency,
       recentHeroReports,
-      interviewMix,
       latestReport,
       profileSummary,
       recommendation,
-      recommendedState,
+      recentImprovement,
+      resumeAnalyzerActivity,
       statCards,
-      topTopics,
       totalMix,
-      topicPerformance,
       userName,
+      weakestCategory,
     };
   }, [metrics, reports]);
 
   const {
     accuracyTrend,
     greeting,
+    bestCategory,
+    categoryPerformance,
+    categoryStats,
+    consistency,
     recentHeroReports,
-    interviewMix,
     latestReport,
     profileSummary,
     recommendation,
-    recommendedState,
+    recentImprovement,
+    resumeAnalyzerActivity,
     statCards,
-    topTopics,
     totalMix,
-    topicPerformance,
     userName,
+    weakestCategory,
   } = dashboardView;
 
   const latestSnapshotSummary = latestReport
@@ -778,12 +898,28 @@ function DashboardPage() {
               ))}
             </section>
 
-            <section className="dashboard-analytics-grid">
+            <section className="dashboard-distribution-grid">
+              <article className="dashboard-panel">
+                <div className="dashboard-panel__header">
+                  <div>
+                    <span className="dashboard-panel__eyebrow">Data distribution</span>
+                    <h2>Category coverage</h2>
+                  </div>
+                  <div className="dashboard-panel__meta">
+                    <Gauge size={16} />
+                    {totalMix} tracked
+                  </div>
+                </div>
+                <DistributionMeter data={categoryStats} total={totalMix} score={metrics.avgScore || 0} />
+              </article>
+            </section>
+
+            <section className="dashboard-performance-grid">
               <article className="dashboard-panel">
                 <div className="dashboard-panel__header">
                   <div>
                     <span className="dashboard-panel__eyebrow">Trend overview</span>
-                    <h2>Accuracy trajectory</h2>
+                    <h2>Performance trajectory</h2>
                   </div>
                   <div className="dashboard-panel__meta">
                     <LineChartIcon size={16} />
@@ -797,108 +933,73 @@ function DashboardPage() {
                 )}
               </article>
 
-              <article className="dashboard-panel">
-                <div className="dashboard-panel__header">
-                  <div>
-                    <span className="dashboard-panel__eyebrow">Role coverage</span>
-                    <h2>Topic performance</h2>
-                  </div>
-                  <div className="dashboard-panel__meta">
-                    <Target size={16} />
-                    Higher is better
-                  </div>
-                </div>
-                {topicPerformance.length ? (
-                  <BarChart data={topicPerformance} />
-                ) : (
-                  <div className="dashboard-empty-state">Topic-level analytics will populate once your reports include role or category context.</div>
-                )}
-              </article>
-            </section>
-
-            <section className="dashboard-details-grid">
               <article className="dashboard-panel dashboard-panel-large">
                 <div className="dashboard-panel__header">
                   <div>
-                    <span className="dashboard-panel__eyebrow">Performance breakdown</span>
-                    <h2>Where you are strongest</h2>
+                    <span className="dashboard-panel__eyebrow">Best category</span>
+                    <h2>Where you perform best</h2>
                   </div>
                   <div className="dashboard-panel__meta dashboard-panel__meta-success">Updated now</div>
                 </div>
 
-                <div className="dashboard-performance-layout">
-                  <div className="dashboard-performance-stats">
-                    <div className="dashboard-kpi-tile">
-                      <span>Technical rounds</span>
-                      <strong>{interviewMix.technical}</strong>
-                    </div>
-                    <div className="dashboard-kpi-tile">
-                      <span>Behavioral rounds</span>
-                      <strong>{interviewMix.behavioral}</strong>
-                    </div>
-                    <div className="dashboard-kpi-tile">
-                      <span>Best recent score</span>
-                      <strong>{latestReport ? `${safeScore(latestReport.overall_score)}%` : "0%"}</strong>
-                    </div>
-                  </div>
-
-                  <div className="dashboard-progress-stack">
-                    {topTopics.length ? (
-                      topTopics.map((topic) => (
-                        <div key={topic.topic} className="dashboard-progress-row">
-                          <div className="dashboard-progress-row__header">
-                            <span>{topic.topic}</span>
-                            <strong>{topic.value}%</strong>
-                          </div>
-                          <div className="dashboard-progress-track">
-                            <div
-                              className={`dashboard-progress-fill dashboard-progress-fill-${topic.tone}`}
-                              style={{ width: `${topic.progress}%` }}
-                            />
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="dashboard-empty-state dashboard-empty-state-inline">Finish more interviews to unlock topic comparisons.</div>
-                    )}
-                  </div>
-                </div>
+                {categoryPerformance.length ? (
+                  <BarChart data={categoryPerformance} />
+                ) : (
+                  <div className="dashboard-empty-state">Category scores will appear after your first evaluated interview.</div>
+                )}
               </article>
+            </section>
 
-              <article className="dashboard-panel">
+            <section className="dashboard-insights-grid">
+              <article className="dashboard-panel dashboard-insight-panel">
                 <div className="dashboard-panel__header">
                   <div>
-                    <span className="dashboard-panel__eyebrow">Activity ratio</span>
-                    <h2>Session mix</h2>
+                    <span className="dashboard-panel__eyebrow">Performance signals</span>
+                    <h2>Quick insights</h2>
                   </div>
                   <div className="dashboard-panel__headline-value">
-                    {totalMix ? `${Math.round((interviewMix.technical / totalMix) * 100)}%` : "0%"}
+                    {bestCategory?.average || 0}%
                   </div>
                 </div>
 
-                <p className="dashboard-section-copy">Technical vs behavioral vs supporting practice split.</p>
-
-                <div className="dashboard-split-bar">
-                  <div style={{ width: `${totalMix ? (interviewMix.technical / totalMix) * 100 : 0}%` }} className="dashboard-split-bar__segment dashboard-split-bar__segment-sky" />
-                  <div style={{ width: `${totalMix ? (interviewMix.behavioral / totalMix) * 100 : 0}%` }} className="dashboard-split-bar__segment dashboard-split-bar__segment-gold" />
-                  <div style={{ width: `${totalMix ? (interviewMix.library / totalMix) * 100 : 0}%` }} className="dashboard-split-bar__segment dashboard-split-bar__segment-slate" />
-                </div>
-
-                <div className="dashboard-activity-grid">
-                  <div className="dashboard-activity-tile">
-                    <strong>{interviewMix.technical}</strong>
-                    <span>Technical</span>
+                <div className="dashboard-insight-stack">
+                  <div className="dashboard-insight-card">
+                    <span>Strongest category</span>
+                    <strong>{bestCategory?.average ? bestCategory.label : "Waiting for data"}</strong>
+                    <p>{bestCategory?.average ? `${bestCategory.average}% average across ${bestCategory.count} tracked session${bestCategory.count === 1 ? "" : "s"}.` : "Complete one evaluated session to calculate this."}</p>
                   </div>
-                  <div className="dashboard-activity-tile dashboard-activity-tile-gold">
-                    <strong>{interviewMix.behavioral}</strong>
-                    <span>Behavioral</span>
+                  <div className="dashboard-insight-card">
+                    <span>Weakest category</span>
+                    <strong>{weakestCategory ? weakestCategory.label : "Need more data"}</strong>
+                    <p>{weakestCategory ? `${weakestCategory.average}% average. Keep the next practice round focused here.` : "The dashboard needs at least one scored category."}</p>
                   </div>
-                  <div className="dashboard-activity-tile dashboard-activity-tile-muted">
-                    <strong>{interviewMix.library}</strong>
-                    <span>Library</span>
+                  <div className="dashboard-insight-card">
+                    <span>Consistency</span>
+                    <strong>{consistency.label}</strong>
+                    <p>{consistency.summary}</p>
+                  </div>
+                  <div className="dashboard-insight-card">
+                    <span>Recent movement</span>
+                    <strong>{formatChange(recentImprovement)}</strong>
+                    <p>Latest session compared with the previous scored session.</p>
                   </div>
                 </div>
               </article>
+            </section>
+
+            <section className="dashboard-category-grid">
+              {categoryStats.map((category) => (
+                <article key={category.key} className="dashboard-category-card" style={{ "--category-color": category.color, "--category-soft": category.softColor }}>
+                  <div className="dashboard-category-card__top">
+                    <span>{category.label}</span>
+                    <strong>{category.count}</strong>
+                  </div>
+                  <div className="dashboard-category-card__meter">
+                    <div style={{ width: `${category.average || (category.count ? 18 : 0)}%` }} />
+                  </div>
+                  <p>{category.average ? `${category.average}% average score` : category.count ? "Activity detected" : "No activity yet"}</p>
+                </article>
+              ))}
             </section>
 
             <section className="dashboard-results-grid">
@@ -973,86 +1074,6 @@ function DashboardPage() {
                 <article className="dashboard-panel dashboard-highlight-panel">
                   <div className="dashboard-panel__header">
                     <div>
-                      <span className="dashboard-panel__eyebrow">Next interview</span>
-                      <h2>AI recommended session</h2>
-                    </div>
-                  </div>
-
-                  <div className="dashboard-highlight-card">
-                    <div className="dashboard-highlight-card__label">
-                      <Rocket size={14} />
-                      {recommendation.nextInterview?.trackLabel || "Starter plan"}
-                    </div>
-                    <h3>{recommendation.nextInterview?.label || "Start your first interview"}</h3>
-                    <p>
-                      {recommendation.nextInterview?.description ||
-                        "Take one interview so the dashboard can build a personalized next-step plan for you."}
-                    </p>
-                    <div className="dashboard-highlight-card__footer">
-                      <span>
-                        {recommendation.nextInterview?.option
-                          ? `${recommendation.nextInterview.option} focus`
-                          : "Personalized after your first report"}
-                      </span>
-                      <ArrowUpRight size={15} />
-                    </div>
-                  </div>
-
-                  <div className="dashboard-recommendation-actions">
-                    <button
-                      type="button"
-                      className="dashboard-primary-action"
-                      onClick={() => {
-                        if (recommendedState) {
-                          navigate("/instructions", { state: recommendedState });
-                        } else {
-                          navigate("/mock-interview");
-                        }
-                      }}
-                    >
-                      Start recommended interview
-                    </button>
-                    <button
-                      type="button"
-                      className="dashboard-secondary-action"
-                      onClick={() => navigate("/dashboard")}
-                    >
-                      Refresh coaching
-                    </button>
-                  </div>
-                </article>
-
-                <article className="dashboard-panel dashboard-tip-panel">
-                  <div className="dashboard-panel__header">
-                    <div>
-                      <span className="dashboard-panel__eyebrow">Improvement loop</span>
-                      <h2>How to improve faster</h2>
-                    </div>
-                  </div>
-
-                  <div className="dashboard-micro-steps">
-                    <div className="dashboard-micro-step">
-                      <MessagesSquare size={16} />
-                      Re-read the last report and note one repeated gap.
-                    </div>
-                    <div className="dashboard-micro-step">
-                      <Target size={16} />
-                      Practice one narrow topic instead of a broad general round.
-                    </div>
-                    <div className="dashboard-micro-step">
-                      <Sparkles size={16} />
-                      Compare the next score against this dashboard to confirm improvement.
-                    </div>
-                  </div>
-                </article>
-              </div>
-            </section>
-
-            <section className="dashboard-results-grid">
-              <div className="dashboard-side-stack">
-                <article className="dashboard-panel dashboard-highlight-panel">
-                  <div className="dashboard-panel__header">
-                    <div>
                       <span className="dashboard-panel__eyebrow">Latest snapshot</span>
                       <h2>Most recent round</h2>
                     </div>
@@ -1068,6 +1089,31 @@ function DashboardPage() {
                     <div className="dashboard-highlight-card__footer">
                       <span>{latestReport ? `${safeScore(latestReport.overall_score)}% score` : "Run a session to populate this card"}</span>
                       {latestReport ? <ArrowUpRight size={15} /> : null}
+                    </div>
+                  </div>
+                </article>
+
+                <article className="dashboard-panel dashboard-highlight-panel">
+                  <div className="dashboard-panel__header">
+                    <div>
+                      <span className="dashboard-panel__eyebrow">Resume activity</span>
+                      <h2>Resume signal</h2>
+                    </div>
+                  </div>
+
+                  <div className="dashboard-highlight-card">
+                    <div className="dashboard-highlight-card__label">
+                      <MessagesSquare size={14} />
+                      Resume tracker
+                    </div>
+                    <h3>{categoryStats.find((item) => item.key === "resume")?.count ? "Resume activity found" : "No resume activity yet"}</h3>
+                    <p>
+                      {resumeAnalyzerActivity.count
+                        ? `${resumeAnalyzerActivity.fileName || "A resume"} was used in the resume analyzer. Resume interview activity is also counted when completed.`
+                        : "Use resume interview or resume analyzer and this dashboard will mark resume activity without showing resume health scores."}
+                    </p>
+                    <div className="dashboard-highlight-card__footer">
+                      <span>{categoryStats.find((item) => item.key === "resume")?.count || 0} tracked resume touchpoints</span>
                     </div>
                   </div>
                 </article>

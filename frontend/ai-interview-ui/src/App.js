@@ -27,6 +27,7 @@ import HRInterview from "./pages/HRInterview";
 import TechnicalInterview from "./pages/TechnicalInterview";
 import MockInterview from "./pages/MockInterview";
 import AptitudeTest from "./pages/AptitudeTest";
+import AptitudeExam from "./pages/AptitudeExam";
 
 /* PROTECTED ROUTE */
 import ProtectedRoute from "./ProtectedRoute";
@@ -276,6 +277,14 @@ function AppRoutes({ routeLocation }) {
         element={
           <ProtectedRoute>
             <AptitudeTest />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/aptitude-exam"
+        element={
+          <ProtectedRoute>
+            <AptitudeExam />
           </ProtectedRoute>
         }
       />
