@@ -16,6 +16,18 @@ function MockInterview() {
   const navigate = useNavigate();
   const rolesList = MOCK_JOB_ROLES;
 
+  // warn before leaving page when user tries to navigate away
+  React.useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      e.preventDefault();
+      e.returnValue = "All submissions and saved data will be lost";
+      return "All submissions and saved data will be lost";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
+
   const [showSetup, setShowSetup] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedOptions, setSelectedOptions] = useState([]);

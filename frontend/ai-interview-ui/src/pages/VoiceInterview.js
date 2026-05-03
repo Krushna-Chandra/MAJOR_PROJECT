@@ -1,6 +1,9 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useScrollToTop } from "../hooks/useScrollToTop";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useInterviewFullscreenGuard } from "../hooks/useInterviewFullscreenGuard";
+import { useRevealFullscreenWarning } from "../hooks/useRevealFullscreenWarning";
+import { clearInterviewFullscreenGuard } from "../utils/interviewFullscreenGuard";
 
 
 
@@ -2364,7 +2367,7 @@ const wait = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
 
 
-function VoiceInterview() {
+function VoiceInterview({ embeddedContext = null, autoStart = false } = {}) {
 
 
 
@@ -2374,9 +2377,23 @@ function VoiceInterview() {
 
   const location = useLocation();
 
+  // warn before leaving page when user tries to navigate away
+  React.useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      e.preventDefault();
+      e.returnValue = "All submissions and saved data will be lost";
+      return "All submissions and saved data will be lost";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
 
 
-  const forceFreshSession = Boolean(location.state?.forceFreshSession);
+
+  const effectiveState = embeddedContext || location.state;
+
+  const forceFreshSession = Boolean(effectiveState?.forceFreshSession);
 
 
 
@@ -2384,11 +2401,11 @@ function VoiceInterview() {
 
 
 
-  const context = (location.state && Object.keys(location.state).length
+  const context = (effectiveState && Object.keys(effectiveState).length
 
 
 
-    ? location.state
+    ? effectiveState
 
 
 
@@ -2475,6 +2492,8 @@ const pauseForFullscreenLossRef = useRef(() => {});
 
 
   const fullscreenBlockedRef = useRef(false);
+  const autoStartedRef = useRef(false);
+  const beginVoiceInterviewRef = useRef(null);
 
 
 
@@ -2667,7 +2686,25 @@ const pauseForFullscreenLossRef = useRef(() => {});
 
 
 
+  const cancelSetupFullscreenGuard = useCallback(() => {
+    navigate("/", { replace: true });
+  }, [navigate]);
+
+
+
+  const {
+    fullscreenBlocked: setupFullscreenBlocked,
+    restoreFullscreen: restoreSetupFullscreen,
+    cancelFullscreenGuard: cancelSetupFullscreen,
+  } = useInterviewFullscreenGuard({
+    enabled: !started && !startupActive && !summary,
+    onCancel: cancelSetupFullscreenGuard,
+  });
+
+
+
   const dialogOpen = showEndConfirm || showFullscreenPrompt;
+  useRevealFullscreenWarning(showFullscreenPrompt || (setupFullscreenBlocked && !dialogOpen));
 
 
 
@@ -4204,7 +4241,7 @@ const runStartupLaunchCountdown = async (runId) => {
 
 
 
-    const target = rootRef.current || document.documentElement;
+    const target = document.documentElement;
 
 
 
@@ -6115,6 +6152,7 @@ const beginVoiceInterview = async () => {
   try {
     setStartupMessage("Entering fullscreen interview room");
     await ensureFullscreen();
+    clearInterviewFullscreenGuard();
     if (!isStartupLaunchActive(startupRunId)) return;
 
     setRestoreNotice("");
@@ -6252,6 +6290,7 @@ const beginVoiceInterview = async () => {
     }
   }
 };
+beginVoiceInterviewRef.current = beginVoiceInterview;
   const restoreFullscreen = async () => {
 
 
@@ -6361,6 +6400,13 @@ const beginVoiceInterview = async () => {
 
 
   };
+
+  useEffect(() => {
+    if (!autoStart || autoStartedRef.current || started || busy || summary) return;
+
+    autoStartedRef.current = true;
+    void beginVoiceInterviewRef.current?.();
+  }, [autoStart, started, busy, summary]);
 
 
 
@@ -7046,7 +7092,7 @@ useEffect(() => {
 
 
 
-    if (location.state || savedInterviewRef.current || started) return;
+    if (effectiveState || savedInterviewRef.current || started) return;
 
 
 
@@ -7078,7 +7124,7 @@ useEffect(() => {
 
 
 
-  }, [location.state, navigate, started]);
+  }, [effectiveState, navigate, started]);
 
 
 
@@ -8877,7 +8923,7 @@ useEffect(() => {
 
 
 
-            <div className="voice-ai-modal-card">
+            <div className="voice-ai-modal-card" data-fullscreen-warning tabIndex="-1">
 
 
 
@@ -8913,11 +8959,11 @@ useEffect(() => {
 
 
 
-                  ? "Continue in fullscreen mode to restart the interview launch sequence, or exit now to cancel the interview start."
+                  ? "Stay in fullscreen to restart the interview launch sequence, or cancel this interview setup now."
 
 
 
-                  : "Continue in fullscreen mode to resume from where the interview was paused, or exit now to end the interview and see your report."}
+                  : "Stay in fullscreen to resume from where the interview was paused, or end the interview and see your report."}
 
 
 
@@ -8969,7 +9015,7 @@ useEffect(() => {
 
 
 
-                  {startupPaused ? "Cancel Interview Start" : "Exit and End Interview"}
+                  {startupPaused ? "Cancel Interview Setup" : "End Interview"}
 
 
 
@@ -8981,7 +9027,7 @@ useEffect(() => {
 
 
 
-                  Continue in Fullscreen
+                  Stay in Fullscreen
 
 
 
@@ -9005,6 +9051,30 @@ useEffect(() => {
 
 
 
+      ) : null}
+
+
+
+      {setupFullscreenBlocked && !dialogOpen ? (
+        <div className="voice-ai-modal-overlay">
+          <div className="voice-ai-modal-card" data-fullscreen-warning tabIndex="-1">
+            <div className="voice-ai-modal-eyebrow">Fullscreen Required</div>
+            <h2 className="voice-ai-modal-title">
+              The interview setup is paused because fullscreen mode was exited.
+            </h2>
+            <p className="voice-ai-modal-copy">
+              Stay in fullscreen to continue the interview setup, or cancel this interview setup now.
+            </p>
+            <div className="voice-ai-modal-actions">
+              <button className="go-back-btn" onClick={cancelSetupFullscreen}>
+                Cancel Interview Setup
+              </button>
+              <button className="mock-btn" onClick={restoreSetupFullscreen}>
+                Stay in Fullscreen
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
 
 

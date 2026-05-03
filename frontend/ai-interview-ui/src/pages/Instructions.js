@@ -1,13 +1,21 @@
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import "../App.css";
 import { useScrollToTop } from "../hooks/useScrollToTop";
 import logo from "../assets/Website Logo.png";
+import { useInterviewFullscreenGuard } from "../hooks/useInterviewFullscreenGuard";
+import { useRevealFullscreenWarning } from "../hooks/useRevealFullscreenWarning";
 
 function Instructions() {
   useScrollToTop();
   const navigate = useNavigate();
   const location = useLocation();
+  const cancelSetup = useCallback(() => {
+    navigate("/", { replace: true });
+  }, [navigate]);
+  const { fullscreenBlocked, restoreFullscreen, cancelFullscreenGuard } =
+    useInterviewFullscreenGuard({ onCancel: cancelSetup });
+  useRevealFullscreenWarning(fullscreenBlocked);
 
   const [user] = useState(() => {
     try {
@@ -16,6 +24,18 @@ function Instructions() {
       return null;
     }
   });
+
+  // warn before leaving page when user tries to navigate away
+  React.useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      e.preventDefault();
+      e.returnValue = "All submissions and saved data will be lost";
+      return "All submissions and saved data will be lost";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
 
   const getUserDisplayName = (user) => {
     if (!user) return "User";
@@ -39,6 +59,10 @@ function Instructions() {
       setTimeout(() => setAlertMessage(""), 3000);
       return;
     }
+    navigate("/interview", { state: location.state || {} });
+  };
+
+  const handleBack = () => {
     navigate("/permissions", { state: location.state || {} });
   };
 
@@ -58,7 +82,7 @@ function Instructions() {
     { icon: "📵", text: "Phone is on silent or away from desk" },
     { icon: "💻", text: "All other applications are closed" },
     { icon: "💧", text: "You have water nearby (optional but helpful)" },
-    { icon: "🔓", text: "Ready for permissions buttons (camera, microphone, location)" }
+    { icon: "🔓", text: "Ready for permission checks (camera, microphone, fullscreen)" }
   ];
 
   return (
@@ -176,11 +200,11 @@ function Instructions() {
               className="btn-continue-new"
               onClick={handleContinue}
             >
-              Continue to Next Step →
+              Let's Begin
             </button>
             <button
               className="btn-back-new"
-              onClick={() => navigate(-1)}
+              onClick={handleBack}
             >
               ← Go Back
             </button>
@@ -192,8 +216,30 @@ function Instructions() {
           </div>
         </div>
       </div>
+      {fullscreenBlocked ? (
+        <div className="voice-ai-modal-overlay">
+          <div className="voice-ai-modal-card" data-fullscreen-warning tabIndex="-1">
+            <div className="voice-ai-modal-eyebrow">Fullscreen Required</div>
+            <h2 className="voice-ai-modal-title">
+              The interview setup is paused because fullscreen mode was exited.
+            </h2>
+            <p className="voice-ai-modal-copy">
+              Stay in fullscreen to continue the interview setup, or cancel this interview setup now.
+            </p>
+            <div className="voice-ai-modal-actions">
+              <button className="go-back-btn" onClick={cancelFullscreenGuard}>
+                Cancel Interview Setup
+              </button>
+              <button className="mock-btn" onClick={restoreFullscreen}>
+                Stay in Fullscreen
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
 
 export default Instructions;
+

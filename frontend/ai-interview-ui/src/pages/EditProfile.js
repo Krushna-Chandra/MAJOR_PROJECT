@@ -19,6 +19,7 @@ function EditProfile() {
   const [profileImage, setProfileImage] = useState(
     storedUser?.profile_image || null
   );
+  const [imageLoadError, setImageLoadError] = useState(false);
   const [originalUploadImage, setOriginalUploadImage] = useState(null);
 
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -125,7 +126,7 @@ function EditProfile() {
 
         {/* CURRENT IMAGE */}
         <div style={{ marginBottom: "20px" }}>
-          {profileImage ? (
+          {profileImage && !imageLoadError ? (
             <>
               <button
                 type="button"
@@ -159,6 +160,7 @@ function EditProfile() {
                     objectFit: "cover",
                     display: "block"
                   }}
+                  onError={() => setImageLoadError(true)}
                 />
                 <span className="edit-image-hover-text">Edit</span>
               </button>

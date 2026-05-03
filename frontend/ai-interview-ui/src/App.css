@@ -14050,6 +14050,12 @@ button {
 
   transition: transform 0.25s ease, box-shadow 0.25s ease, background-color 0.25s ease;
 
+  opacity: 0;
+
+  transform: translateY(20px);
+
+  animation: fadeInUp 0.8s ease-out forwards 0.24s;
+
 }
 
 
@@ -19950,6 +19956,8 @@ button {
 
   padding: 24px;
 
+  overflow-y: auto;
+
   background: rgba(2, 6, 23, 0.58);
 
   backdrop-filter: blur(14px);
@@ -19961,6 +19969,10 @@ button {
 .voice-ai-modal-card {
 
   width: min(100%, 560px);
+
+  max-height: calc(100vh - 48px);
+
+  overflow-y: auto;
 
   padding: 26px 26px 24px;
 
@@ -20051,6 +20063,50 @@ button {
   flex-wrap: wrap;
 
   margin-top: 24px;
+
+}
+
+[data-fullscreen-warning] .voice-ai-modal-actions {
+
+  justify-content: center;
+
+  align-items: center;
+
+  gap: 16px;
+
+}
+
+[data-fullscreen-warning] .voice-ai-modal-actions .mock-btn,
+
+[data-fullscreen-warning] .voice-ai-modal-actions .go-back-btn {
+
+  margin-top: 0;
+
+}
+
+[data-back-confirmation] .voice-ai-modal-title,
+
+[data-back-confirmation] .voice-ai-modal-copy {
+
+  text-align: center;
+
+}
+
+[data-back-confirmation] .voice-ai-modal-actions {
+
+  justify-content: center;
+
+  align-items: center;
+
+  gap: 16px;
+
+}
+
+[data-back-confirmation] .voice-ai-modal-actions .mock-btn,
+
+[data-back-confirmation] .voice-ai-modal-actions .go-back-btn {
+
+  margin-top: 0;
 
 }
 
@@ -36187,6 +36243,45 @@ button {
 
   cursor: not-allowed;
 
+}
+
+.auth-modern-divider-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 20px;
+  width: 100%;
+}
+
+.auth-modern-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #9ca3af;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.auth-modern-divider::before,
+.auth-modern-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #e5e7eb;
+}
+
+.auth-modern-google-button {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.auth-modern-google-button > div {
+  width: 100% !important;
+}
+
+.auth-modern-google-button button {
+  width: 100% !important;
 }
 
 

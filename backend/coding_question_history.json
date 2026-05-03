@@ -1,6 +1,5 @@
 {
   "easy": [
-    "count positive numbers",
     "cyclic alphabet shift",
     "count words with prefix",
     "sum of digits of smallest number",
@@ -15,27 +14,31 @@
     "count vowels in a string",
     "count words with vowels",
     "count even numbers in a list",
+    "palindrome number check",
+    "count non-alphanumeric characters",
+    "count positive numbers",
     "sum of digits"
   ],
   "hard": [
     "trapping rain water",
-    "sliding window maximum",
-    "largest rectangle in histogram",
     "median of running stream",
     "word ladder steps",
     "longest unique substring length",
     "alien dictionary order",
-    "minimum window substring length"
+    "minimum window substring length",
+    "largest rectangle in histogram",
+    "sliding window maximum"
   ],
   "medium": [
     "validate bracket sequence",
-    "group anagrams",
     "product of array except self",
     "maximize points by deleting numbers",
     "merge overlapping intervals",
     "longest consecutive run",
     "longest subarray with sum k",
     "spiral order of matrix",
-    "top k frequent numbers"
+    "top k frequent numbers",
+    "array split point",
+    "group anagrams"
   ]
 }

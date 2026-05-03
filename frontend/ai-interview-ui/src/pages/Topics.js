@@ -321,10 +321,10 @@ function Topics() {
     setIsLocked(true);
   };
 
-  const proceedToInstructions = () => {
+  const proceedToPermissions = () => {
     if (!confirmedSelection) return;
 
-    navigate("/instructions", {
+    navigate("/permissions", {
       state: {
         category,
         selectedMode: confirmedSelection.mode,
@@ -1022,8 +1022,8 @@ function Topics() {
                   </div>
                 </div>
 
-                <button className="start-interview-confirm" onClick={proceedToInstructions}>
-                  Proceed to Instructions
+                <button className="start-interview-confirm" onClick={proceedToPermissions}>
+                  Proceed to Permissions
                 </button>
               </div>
             ) : null}

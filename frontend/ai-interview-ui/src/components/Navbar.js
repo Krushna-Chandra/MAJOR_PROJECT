@@ -14,6 +14,7 @@ function Navbar() {
   const [showProfile, setShowProfile] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [imageLoadError, setImageLoadError] = useState(false);
   // Always use user.profile_image for display, keep in sync with localStorage
   const [cropModalImg, setCropModalImg] = useState(null);
 
@@ -81,6 +82,21 @@ function Navbar() {
 
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  useEffect(() => {
+    const handleAuthChange = () => {
+      try {
+        const updatedUser = JSON.parse(localStorage.getItem("user"));
+        setUser(updatedUser);
+        setImageLoadError(false); // Reset image load error on auth change
+      } catch (e) {
+        setUser(null);
+      }
+    };
+
+    window.addEventListener("authchange", handleAuthChange);
+    return () => window.removeEventListener("authchange", handleAuthChange);
   }, []);
 
   return (
@@ -184,8 +200,13 @@ function Navbar() {
                 }}
               >
                 <div className="profile-icon">
-                  {user?.profile_image ? (
-                    <img src={user.profile_image} alt="Profile" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                  {user?.profile_image && !imageLoadError ? (
+                    <img 
+                      src={user.profile_image} 
+                      alt="Profile" 
+                      style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
+                      onError={() => setImageLoadError(true)}
+                    />
                   ) : (
                     userInitial
                   )}
@@ -210,8 +231,13 @@ function Navbar() {
                             document.getElementById('profile-img-input').click();
                           }}
                         >
-                          {user?.profile_image ? (
-                            <img src={user.profile_image} alt="Profile" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                          {user?.profile_image && !imageLoadError ? (
+                            <img 
+                              src={user.profile_image} 
+                              alt="Profile" 
+                              style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
+                              onError={() => setImageLoadError(true)}
+                            />
                           ) : (
                             <span className="profile-img-initial">{userInitial}</span>
                           )}

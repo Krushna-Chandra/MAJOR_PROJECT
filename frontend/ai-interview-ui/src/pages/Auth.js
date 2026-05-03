@@ -26,6 +26,20 @@ function Auth() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
 
+  // Initialize Google Sign-In
+  React.useEffect(() => {
+    if (isLogin && window.google) {
+      window.google.accounts.id.initialize({
+        client_id: process.env.REACT_APP_GOOGLE_CLIENT_ID,
+        callback: handleGoogleSuccess
+      });
+      window.google.accounts.id.renderButton(
+        document.getElementById('google-signin-button'),
+        { theme: 'outline', size: 'large', width: '100%' }
+      );
+    }
+  }, [isLogin]);
+
   const authHighlights = [
     {
       icon: BriefcaseBusiness,
@@ -97,6 +111,37 @@ function Auth() {
       setError(msg);
       setLoading(false);
     }
+  };
+
+  const handleGoogleSuccess = async (response) => {
+    setError(null);
+    setLoading(true);
+    const loadingStartedAt = Date.now();
+    try {
+      const res = await api.post("/auth/google-login", {
+        token: response.credential
+      });
+      const remainingDelay = Math.max(0, 700 - (Date.now() - loadingStartedAt));
+      if (remainingDelay > 0) {
+        await delay(remainingDelay);
+      }
+      localStorage.setItem("token", res.data.access_token);
+      localStorage.setItem("user", JSON.stringify(res.data.user));
+      window.dispatchEvent(new Event("authchange"));
+      clearFields();
+      navigate("/");
+    } catch (err) {
+      const msg = typeof err.response?.data?.detail === "string"
+        ? err.response.data.detail
+        : err.response?.data?.detail?.[0]?.msg || "Google sign-in failed";
+      setError(msg);
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleError = () => {
+    setError("Google sign-in failed. Please try again.");
+    setLoading(false);
   };
 
   return (
@@ -307,6 +352,15 @@ function Auth() {
                   )}
                 </button>
               </form>
+
+              {isLogin && (
+                <div className="auth-modern-divider-section">
+                  <div className="auth-modern-divider">
+                    <span>OR</span>
+                  </div>
+                  <div className="auth-modern-google-button" id="google-signin-button"></div>
+                </div>
+              )}
 
               <div className="auth-modern-footer">
                 <span>

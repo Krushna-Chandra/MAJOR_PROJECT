@@ -12,6 +12,8 @@ from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict
 import numpy as np
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token
 from fastapi import (
     FastAPI,
     UploadFile,
@@ -22,6 +24,7 @@ from fastapi import (
     Query
 )
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from jose import jwt, JWTError
 from bson import ObjectId
 from bson.errors import InvalidId
@@ -91,16 +94,27 @@ RESUME_STRUCTURED_SECTION_KEYWORDS = {
         "professional summary",
         "summary",
         "profile",
+        "professional profile",
+        "about me",
+        "about",
     ],
     "education": [
         "education",
         "educational qualification",
         "educational qualifications",
+        "academic background",
+        "academic qualification",
+        "academics",
+        "qualifications",
     ],
     "experience": [
         "experience",
         "work experience",
         "professional experience",
+        "employment",
+        "employment history",
+        "career",
+        "job experience",
     ],
     "projects_internships": [
         "internships and projects",
@@ -116,35 +130,60 @@ RESUME_STRUCTURED_SECTION_KEYWORDS = {
         "projects",
         "project",
         "project experience",
+        "academic projects",
+        "personal projects",
     ],
     "internships": [
         "internships",
         "internship",
+        "internship experience",
+        "industrial training",
+        "training",
     ],
     "skills": [
         "technical skills",
+        "key skills",
         "skills",
+        "core competencies",
+        "competencies",
+        "technical competencies",
+        "programming skills",
+        "tools & technologies",
+        "tools and technologies",
+        "tools",
+        "technologies",
     ],
     "achievements": [
         "achievements",
         "key achievements",
         "accomplishments",
+        "awards",
+        "awards & recognition",
+        "recognitions",
     ],
     "languages": [
         "languages known",
         "languages",
+        "language",
+        "language proficiency",
+        "linguistic abilities",
     ],
     "hobbies": [
         "hobbies",
         "interests",
         "extra curricular",
         "extracurricular activities",
+        "personal interests",
+        "activities",
+        "hobbies and interests",
     ],
     "personal": [
         "personal details",
+        "personal information",
     ],
     "declaration": [
         "declaration",
+        "declarations",
     ],
 }
 
@@ -1281,8 +1320,9 @@ def _extract_skill_items_from_section_lines(lines: list[str], limit: int = 12) -
                     left_label = _format_resume_skill_label(amp_parts[0]) or amp_parts[0]
                     expanded.append(left_label)
                     right_tokens = amp_parts[1].split()
-                    if len(right_tokens) == 1 and left_label.split():
-                        expanded.append(f"{left_label.split()[0]} {amp_parts[1]}")
+                    left_tokens = left_label.split() if left_label else []
+                    if len(right_tokens) == 1 and left_tokens:
+                        expanded.append(f"{left_tokens[0]} {amp_parts[1]}")
                     else:
                         expanded.append(amp_parts[1])
                     continue
@@ -1410,11 +1450,22 @@ def _extract_resume_lines_smart(text: str, limit: int = 8) -> list[str]:
 
 def _build_resume_analysis_payload(text: str, file_name: str = "") -> dict:
     normalized = _normalize_resume_text(text)
-    lines = _extract_resume_lines_smart(text, limit=20)
+    lines = _extract_resume_lines_smart(text, limit=30)
     section_skills = _extract_skills_section_items(text, limit=12)
+    
+    # Fallback: Extract skills from experience/project descriptions
+    fallback_skills = []
+    experience_text = " ".join(_get_resume_section_lines(text, ["experience"], limit=20))
+    if experience_text:
+        fallback_skills.extend(_extract_resume_skills(experience_text))
+    
+    project_text = " ".join(_get_resume_section_lines(text, ["projects", "internships"], limit=20))
+    if project_text:
+        fallback_skills.extend(_extract_resume_skills(project_text))
+    
     skills = []
     seen_skills = set()
-    for item in section_skills:
+    for item in section_skills + fallback_skills:
         label = _format_resume_skill_label(item)
         canonical = _canonical_keyword(label)
         if not canonical or canonical in seen_skills:
@@ -1428,10 +1479,20 @@ def _build_resume_analysis_payload(text: str, file_name: str = "") -> dict:
     skills = skills[:24]
     signal_details = _resume_signal_details(text, file_name)
 
+    # Improved education extraction - more keywords
     education = [
         line for line in lines
-        if re.search(r"\b(university|college|bachelor|master|degree|b\.tech|m\.tech|school)\b", line, re.I)
-    ][:5]
+        if re.search(r"\b(university|college|bachelor|master|degree|b\.tech|m\.tech|school|high school|diploma|associate|semester|graduated|graduation|class|course|institute)\b", line, re.I)
+    ][:6]
+    
+    # Fallback: search entire text for education
+    if not education:
+        all_lines = _prepare_resume_lines(text)
+        education = [
+            line for line in all_lines
+            if re.search(r"\b(university|college|bachelor|master|degree|b\.tech|m\.tech|school|high school|diploma|associate|semester|graduated|graduation|class|course|institute)\b", line, re.I)
+        ][:6]
+    
     experience = _extract_section_entries(
         _get_resume_section_lines(
             text,
@@ -1440,12 +1501,31 @@ def _build_resume_analysis_payload(text: str, file_name: str = "") -> dict:
         ),
         limit=6,
     )
+    
+    # Fallback: Extract experience entries with action verbs
+    if not experience:
+        all_prepared_lines = _prepare_resume_lines(text)
+        action_verbs = r"\b(developed|contributed|worked|learned|designed|built|implemented|improved|created|drove|driving|adopted|achieved|managed|led|responsible|collaborated|coordinated|supported|assisted|maintained)\b"
+        experience = [
+            line for line in all_prepared_lines
+            if re.search(action_verbs, line, re.I) and len(line.split()) >= 4
+        ][:6]
+    
     project_section_lines = _get_resume_section_lines(
         text,
         ["projects_internships", "projects", "internships"],
         limit=12,
     )
     projects = _extract_project_section_items(project_section_lines, limit=6, internships_only=False)
+    
+    # Fallback: Extract projects if section not found
+    if not projects:
+        all_prepared_lines = _prepare_resume_lines(text)
+        project_keywords = r"\b(project|internship|intern|system|frontend|front-end|application|extension|application|platform|solution|tool)\b"
+        projects = [
+            line for line in all_prepared_lines
+            if re.search(project_keywords, line, re.I) and len(line.split()) >= 4 and len(line) > 20
+        ][:6]
 
     likely_name = lines[0] if lines else ""
     if re.search(r"(resume|cv|education|skills|experience)", likely_name, re.I):
@@ -1849,7 +1929,7 @@ def _extract_resume_objective(text: str) -> str:
             obj_spaced = _add_spaces_to_concatenated_text(obj_cleaned)
             
             # Step 3: Capitalize first letter
-            if obj_spaced:
+            if obj_spaced and len(obj_spaced) > 0:
                 obj_spaced = obj_spaced[0].upper() + obj_spaced[1:]
             
             return obj_spaced.strip()
@@ -2119,60 +2199,86 @@ def _build_simple_resume_text(
 
 
 def _build_resume_interview_extract_payload(text: str, file_name: str = "", job_role: str = "") -> dict:
-    normalized = _normalize_resume_text(text)
-    analysis = _build_resume_analysis_payload(text, file_name)
-    project_section_lines = _get_resume_section_lines(
-        text,
-        ["projects_internships", "projects", "internships"],
-        limit=12,
-    )
-    internships = _extract_project_section_items(project_section_lines, limit=6, internships_only=True)
-    hobbies = _extract_resume_hobbies(text)
-    career_objective = _extract_resume_objective(text)
-    achievements = _extract_resume_achievements(text)
-    languages = _extract_resume_languages(text)
-    educational_qualifications = analysis.get("education") or []
-    experience = analysis.get("experience_highlights") or []
-    projects = analysis.get("project_highlights") or []
-    skills = analysis.get("skills") or []
-    candidate_name = _extract_candidate_name_from_resume(text, file_name) or analysis.get("candidate_name") or ""
+    try:
+        normalized = _normalize_resume_text(text)
+        analysis = _build_resume_analysis_payload(text, file_name)
+        project_section_lines = _get_resume_section_lines(
+            text,
+            ["projects_internships", "projects", "internships"],
+            limit=12,
+        )
+        internships = _extract_project_section_items(project_section_lines, limit=6, internships_only=True)
+        hobbies = _extract_resume_hobbies(text) or []
+        career_objective = _extract_resume_objective(text) or ""
+        achievements = _extract_resume_achievements(text) or []
+        languages = _extract_resume_languages(text) or []
+        educational_qualifications = analysis.get("education") or []
+        experience = analysis.get("experience_highlights") or []
+        projects = analysis.get("project_highlights") or []
+        skills = analysis.get("skills") or []
+        candidate_name = _extract_candidate_name_from_resume(text, file_name) or analysis.get("candidate_name") or ""
 
-    extracted = {
-        "career_objective": career_objective,
-        "educational_qualifications": educational_qualifications[:6],
-        "technical_skills": skills[:12],
-        "projects": projects[:6],
-        "internships": internships,
-        "experience": experience[:6],
-        "achievements": achievements[:6],
-        "languages": languages[:6],
-        "hobbies": hobbies[:6],
-    }
+        extracted = {
+            "career_objective": career_objective if isinstance(career_objective, str) else "",
+            "educational_qualifications": educational_qualifications[:6] if isinstance(educational_qualifications, list) else [],
+            "technical_skills": skills[:12] if isinstance(skills, list) else [],
+            "projects": projects[:6] if isinstance(projects, list) else [],
+            "internships": internships[:6] if isinstance(internships, list) else [],
+            "experience": experience[:6] if isinstance(experience, list) else [],
+            "achievements": achievements[:6] if isinstance(achievements, list) else [],
+            "languages": languages[:6] if isinstance(languages, list) else [],
+            "hobbies": hobbies[:6] if isinstance(hobbies, list) else [],
+        }
 
-    strong_signal_found = bool(skills or projects or experience)
-    recommended_focus = []
-    for item in skills[:8] + projects[:4] + experience[:4]:
-        cleaned = _normalize_resume_text(item)
-        if cleaned and cleaned not in recommended_focus:
-            recommended_focus.append(cleaned)
+        strong_signal_found = bool((skills and isinstance(skills, list)) or (projects and isinstance(projects, list)) or (experience and isinstance(experience, list)))
+        recommended_focus = []
+        for item in (skills[:8] if isinstance(skills, list) else []) + (projects[:4] if isinstance(projects, list) else []) + (experience[:4] if isinstance(experience, list) else []):
+            cleaned = _normalize_resume_text(item)
+            if cleaned and cleaned not in recommended_focus:
+                recommended_focus.append(cleaned)
 
-    return {
-        "resume_text": normalized,
-        "raw_resume_text": text[:12000],
-        "normalized_resume_text": _prepare_resume_text_for_display(text)[:12000],
-        "analysis": analysis,
-        "candidate_name": candidate_name,
-        "extracted": extracted,
-        "simple_resume_text": _build_simple_resume_text(candidate_name, job_role, extracted, text)[:12000],
-        "job_role": job_role,
-        "interview_ready": strong_signal_found,
-        "ready_reason": (
-            "The resume has enough usable interview signals to generate personalized questions."
-            if strong_signal_found
-            else "Add at least one clear skill, project, or experience item before starting a resume-based interview."
-        ),
-        "recommended_focus": recommended_focus[:10],
-    }
+        return {
+            "resume_text": normalized,
+            "raw_resume_text": text[:12000],
+            "normalized_resume_text": _prepare_resume_text_for_display(text)[:12000],
+            "analysis": analysis,
+            "candidate_name": candidate_name,
+            "extracted": extracted,
+            "simple_resume_text": _build_simple_resume_text(candidate_name, job_role, extracted, text)[:12000],
+            "job_role": job_role,
+            "interview_ready": strong_signal_found,
+            "ready_reason": (
+                "The resume has enough usable interview signals to generate personalized questions."
+                if strong_signal_found
+                else "Add at least one clear skill, project, or experience item before starting a resume-based interview."
+            ),
+            "recommended_focus": recommended_focus[:10],
+        }
+    except Exception as exc:
+        # Return minimal valid payload on error
+        return {
+            "resume_text": _normalize_resume_text(text),
+            "raw_resume_text": text[:12000],
+            "normalized_resume_text": _prepare_resume_text_for_display(text)[:12000],
+            "analysis": {},
+            "candidate_name": "",
+            "extracted": {
+                "career_objective": "",
+                "educational_qualifications": [],
+                "technical_skills": [],
+                "projects": [],
+                "internships": [],
+                "experience": [],
+                "achievements": [],
+                "languages": [],
+                "hobbies": [],
+            },
+            "simple_resume_text": "",
+            "job_role": job_role,
+            "interview_ready": False,
+            "ready_reason": f"Error during resume extraction: {str(exc)}",
+            "recommended_focus": [],
+        }
 
 
 def _canonical_keyword(value: str) -> str:
@@ -3516,6 +3622,98 @@ async def login(
             "profile_image": user.get("profile_image")
         }
     }
+
+# ================= GOOGLE LOGIN =================
+class GoogleTokenRequest(BaseModel):
+    """Request body for Google OAuth login"""
+    token: str
+
+@app.post("/auth/google-login")
+async def google_login(request: GoogleTokenRequest):
+    """
+    Verify Google OAuth token and authenticate user
+    """
+    from config import load_backend_env
+    load_backend_env()
+    
+    try:
+        google_client_id = os.getenv("GOOGLE_CLIENT_ID")
+        if not google_client_id:
+            raise HTTPException(
+                status_code=500,
+                detail="Google OAuth not configured"
+            )
+        
+        # Verify the Google token
+        idinfo = id_token.verify_oauth2_token(
+            request.token, 
+            google_requests.Request(), 
+            google_client_id
+        )
+        
+        # Extract user information from token
+        email = idinfo.get("email")
+        first_name = idinfo.get("given_name", "")
+        last_name = idinfo.get("family_name", "")
+        profile_image = idinfo.get("picture", None)
+        
+        if not email:
+            raise HTTPException(
+                status_code=400,
+                detail="Could not extract email from Google token"
+            )
+        
+        # Find or create user
+        user = await users_collection.find_one({"email": email})
+        
+        if not user:
+            # Create new user from Google profile
+            user = {
+                "first_name": first_name,
+                "last_name": last_name,
+                "email": email,
+                "hashed_password": None,  # No password for OAuth users
+                "profile_image": profile_image,
+                "auth_provider": "google"
+            }
+            result = await users_collection.insert_one(user)
+            user["_id"] = result.inserted_id
+        else:
+            # Update profile image if Google provides one
+            if profile_image and not user.get("profile_image"):
+                await users_collection.update_one(
+                    {"_id": user["_id"]},
+                    {"$set": {"profile_image": profile_image}}
+                )
+                user["profile_image"] = profile_image
+        
+        # Create JWT token
+        jwt_token = create_token({
+            "user_id": str(user["_id"]),
+            "email": user["email"]
+        })
+        
+        return {
+            "access_token": jwt_token,
+            "user": {
+                "id": str(user["_id"]),
+                "email": user["email"],
+                "first_name": user.get("first_name"),
+                "last_name": user.get("last_name"),
+                "profile_image": user.get("profile_image")
+            }
+        }
+    
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid Google token: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Google authentication failed: {str(e)}"
+        )
 
 # ================= FORGOT PASSWORD =================
 @app.post("/auth/forgot-password")

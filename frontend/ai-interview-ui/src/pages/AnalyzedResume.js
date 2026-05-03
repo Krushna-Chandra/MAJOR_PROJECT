@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { ArrowLeft, CheckCircle2, FileText, Home, Mic, RotateCcw } from "lucide-react";
+import { ArrowLeft, CheckCircle2, FileText, Home, Mic } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import "../App.css";
 import MiniNavbar from "../components/MiniNavbar";
@@ -107,10 +107,35 @@ function AnalyzedResume() {
 
   const candidateName =
     reviewData.candidate_name || resumeName.replace(/\.pdf$/i, "").replace(/[_-]+/g, " ") || "Candidate";
+  
+  // Parse hobbies and languages - handle both array and comma-separated string formats
+  const parseItems = (items) => {
+    if (!items) return [];
+    let itemArray = Array.isArray(items) ? items : [items];
+    
+    // Flatten and split comma-separated values
+    return itemArray
+      .map(item => {
+        if (!item) return null;
+        if (typeof item === 'string') {
+          // Split by comma and clean up
+          return item.split(',').map(i => i.trim()).filter(Boolean);
+        }
+        return item;
+      })
+      .flat()
+      .filter(Boolean);
+  };
+  
+  const hobbiesParsed = parseItems(extractedSections.hobbies);
+  const languagesParsed = parseItems(extractedSections.languages);
+  
   const skillCount = (extractedSections.technical_skills || []).length;
   const projectCount = combinedProjectInternshipItems.length;
   const experienceCount = (extractedSections.experience || []).length;
   const educationCount = (extractedSections.educational_qualifications || []).length;
+  const languageCount = languagesParsed.length;
+  const hobbyCount = hobbiesParsed.length;
 
   const startInterview = () => {
     navigate("/interview", {
@@ -209,20 +234,6 @@ function AnalyzedResume() {
           </aside>
 
           <div className="analyzed-pro-details">
-            <article className="analyzed-pro-card is-focus">
-              <div className="analyzed-pro-card-head">
-                <div>
-                  <span>Interview Focus</span>
-                  <h2>What the interview will emphasize</h2>
-                </div>
-                <button type="button" className="analyzed-pro-small-btn" onClick={() => navigate("/resume-interview")}>
-                  <RotateCcw size={16} />
-                  Recheck
-                </button>
-              </div>
-              {renderChips(currentFocusAreas, "No focus areas were generated yet.", 14)}
-            </article>
-
             {extractedSections.career_objective ? (
               <article className="analyzed-pro-card">
                 <div className="analyzed-pro-card-head">
@@ -281,15 +292,21 @@ function AnalyzedResume() {
               <article className="analyzed-pro-card">
                 <div className="analyzed-pro-card-head">
                   <div>
-                    <span>Additional signals</span>
-                    <h2>Languages & Interests</h2>
+                    <span>{languageCount} found</span>
+                    <h2>Languages</h2>
                   </div>
                 </div>
-                {renderChips(
-                  [...(extractedSections.languages || []), ...(extractedSections.hobbies || [])],
-                  "No language or interest details found.",
-                  10
-                )}
+                {renderChips(languagesParsed, "No languages found.", 10)}
+              </article>
+
+              <article className="analyzed-pro-card">
+                <div className="analyzed-pro-card-head">
+                  <div>
+                    <span>{hobbyCount} found</span>
+                    <h2>Interests & Hobbies</h2>
+                  </div>
+                </div>
+                {renderChips(hobbiesParsed, "No hobbies found.", 10)}
               </article>
             </div>
           </div>

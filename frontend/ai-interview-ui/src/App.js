@@ -28,6 +28,7 @@ import TechnicalInterview from "./pages/TechnicalInterview";
 import MockInterview from "./pages/MockInterview";
 import AptitudeTest from "./pages/AptitudeTest";
 import AptitudeExam from "./pages/AptitudeExam";
+import { isInterviewFullscreenGuardActive } from "./utils/interviewFullscreenGuard";
 
 /* PROTECTED ROUTE */
 import ProtectedRoute from "./ProtectedRoute";
@@ -39,6 +40,8 @@ const usesMainNavbar = (pathname) =>
   ["/", "/about", "/dashboard", "/resume-analyzer", "/resume-analyzer/results"].includes(pathname);
 const usesFooter = (pathname) =>
   ["/", "/dashboard", "/about"].includes(pathname);
+const isInterviewFullscreenRoute = (pathname) =>
+  ["/instructions", "/permissions", "/interview", "/voice-interview"].includes(pathname);
 
 function ScrollRevealManager() {
   const location = useLocation();
@@ -305,7 +308,14 @@ function AnimatedRoutes() {
     if (currentPath !== displayPath || location.key !== displayLocation.key) {
       nextLocationRef.current = location;
 
-      if (isHomeRoute(displayLocation.pathname) || isHomeRoute(location.pathname)) {
+      const shouldSkipTransition =
+        isHomeRoute(displayLocation.pathname) ||
+        isHomeRoute(location.pathname) ||
+        (isInterviewFullscreenGuardActive() &&
+          (isInterviewFullscreenRoute(displayLocation.pathname) ||
+            isInterviewFullscreenRoute(location.pathname)));
+
+      if (shouldSkipTransition) {
         setDisplayLocation(location);
         setTransitionStage("enter");
         return;

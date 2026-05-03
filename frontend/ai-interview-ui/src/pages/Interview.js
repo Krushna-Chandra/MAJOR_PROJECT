@@ -2,6 +2,10 @@ import React, { useEffect, useRef, useState } from "react";
 import { useScrollToTop } from "../hooks/useScrollToTop";
 import { useLocation, useNavigate } from "react-router-dom";
 import "../App.css";
+import VoiceInterview from "./VoiceInterview";
+import { useInterviewFullscreenGuard } from "../hooks/useInterviewFullscreenGuard";
+import { useRevealFullscreenWarning } from "../hooks/useRevealFullscreenWarning";
+import { clearInterviewFullscreenGuard } from "../utils/interviewFullscreenGuard";
 
 function Interview() {
   const navigate = useNavigate();
@@ -9,49 +13,35 @@ function Interview() {
   const customContext = location.state || {};
   const interviewRootRef = useRef(null);
 
+  // warn before leaving page when user tries to navigate away
+  React.useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      e.preventDefault();
+      e.returnValue = "All submissions and saved data will be lost";
+      return "All submissions and saved data will be lost";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
+
   const [status, setStatus] = useState("Ready to launch your live interview.");
   const [error, setError] = useState("");
   const [launching, setLaunching] = useState(false);
   const [showFullscreenPrompt, setShowFullscreenPrompt] = useState(false);
+  const [embeddedInterviewContext, setEmbeddedInterviewContext] = useState(null);
 
-  const hasResumeContext = Boolean(customContext.resumeText || customContext.jobRole);
-
-  const isFullscreenActive = () => Boolean(
-    document.fullscreenElement ||
-    document.webkitFullscreenElement ||
-    document.msFullscreenElement
-  );
-
-  const ensureFullscreenMode = async () => {
-    if (isFullscreenActive()) return true;
-
-    const target = interviewRootRef.current || document.documentElement;
-    const requestFullscreen =
-      target.requestFullscreen ||
-      target.webkitRequestFullscreen ||
-      target.msRequestFullscreen;
-
-    if (!requestFullscreen) {
-      throw new Error("Fullscreen mode is not supported in this browser.");
-    }
-
-    await requestFullscreen.call(target);
-
-    if (!isFullscreenActive()) {
-      throw new Error("Fullscreen did not start. Please try again.");
-    }
-
-    return true;
+  const cancelSetup = () => {
+    clearInterviewFullscreenGuard();
+    navigate("/", { replace: true });
   };
 
-  const openVoiceInterview = () => {
-    navigate("/voice-interview", {
-      state: {
-        ...customContext,
-        forceFreshSession: true,
-        startSource: "interview-page",
-      },
-    });
+  const { fullscreenBlocked, restoreFullscreen, cancelFullscreenGuard } =
+    useInterviewFullscreenGuard({ onCancel: cancelSetup });
+  useRevealFullscreenWarning(fullscreenBlocked);
+
+  const handleGoBack = () => {
+    navigate("/instructions", { state: customContext });
   };
 
   const beginInterview = async () => {
@@ -60,41 +50,18 @@ function Interview() {
     setLaunching(true);
     setError("");
     setShowFullscreenPrompt(false);
-    setStatus("Requesting fullscreen access...");
+    setStatus("Opening the live interview room...");
 
-    try {
-      await ensureFullscreenMode();
-      setStatus("Opening the live interview room...");
-      openVoiceInterview();
-    } catch (requestError) {
-      setLaunching(false);
-      setShowFullscreenPrompt(true);
-      setStatus("Fullscreen is required before the interview can start.");
-      setError(requestError?.message || "Fullscreen is required to continue.");
-    }
+    setEmbeddedInterviewContext({
+      ...customContext,
+      forceFreshSession: true,
+      startSource: "interview-page",
+    });
   };
 
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      if (!launching) return;
-      if (isFullscreenActive()) return;
-
-      setLaunching(false);
-      setShowFullscreenPrompt(true);
-      setStatus("Fullscreen is required before the interview can start.");
-    };
-
-    document.addEventListener("fullscreenchange", handleFullscreenChange);
-    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
-  }, [launching]);
-
-  const handleGoBack = () => {
-    if (hasResumeContext) {
-      navigate("/resume-interview", { state: customContext });
-      return;
-    }
-    navigate(-1);
-  };
+  if (embeddedInterviewContext) {
+    return <VoiceInterview embeddedContext={embeddedInterviewContext} autoStart />;
+  }
 
   return (
     <div
@@ -155,7 +122,7 @@ function Interview() {
           <div style={{ maxWidth: 920, margin: "0 auto", textAlign: "center" }}>
             <h1>Ready to Start Your Interview?</h1>
             <p style={{ fontSize: 16, color: "#555", marginTop: 12 }}>
-              Stay in fullscreen from the moment you launch the session. Once the live interview room opens, the voice interview page will continue with the same fullscreen protection, startup countdown, and pause confirmation flow.
+              Stay in fullscreen from the permission step through the live interview. Once the live interview room opens, the voice interview page will continue with the same fullscreen protection, startup countdown, and pause confirmation flow.
             </p>
             <p style={{ fontSize: 14, color: "#6b7280", marginTop: 10 }}>
               Status: <strong>{status}</strong>
@@ -180,6 +147,28 @@ function Interview() {
       <div className="footer" style={{ marginTop: "auto", marginBottom: 0 }}>
         Launch screen ready - fullscreen is required before the live interview begins
       </div>
+
+      {fullscreenBlocked ? (
+        <div className="voice-ai-modal-overlay">
+          <div className="voice-ai-modal-card" data-fullscreen-warning tabIndex="-1">
+            <div className="voice-ai-modal-eyebrow">Fullscreen Required</div>
+            <h2 className="voice-ai-modal-title">
+              The interview setup is paused because fullscreen mode was exited.
+            </h2>
+            <p className="voice-ai-modal-copy">
+              Stay in fullscreen to continue the interview setup, or cancel this interview setup now.
+            </p>
+            <div className="voice-ai-modal-actions">
+              <button className="go-back-btn" onClick={cancelFullscreenGuard}>
+                Cancel Interview Setup
+              </button>
+              <button className="mock-btn" onClick={restoreFullscreen}>
+                Stay in Fullscreen
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -913,6 +913,18 @@ function buildAptitudeReportPayload(summary, candidateName = "") {
 
 function AptitudeTest({ examOnly = false }) {
   const navigate = useNavigate();
+
+  // warn before leaving page when user tries to navigate away
+  React.useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      e.preventDefault();
+      e.returnValue = "All submissions and saved data will be lost";
+      return "All submissions and saved data will be lost";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
   const [stage, setStage] = useState(examOnly ? "loading" : "landing");
   const [selectedSection, setSelectedSection] = useState("aptitude");
   const [questionCount, setQuestionCount] = useState(10);

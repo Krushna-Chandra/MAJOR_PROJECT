@@ -2,6 +2,12 @@ import React, { useState, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import "../App.css";
 import { useScrollToTop } from "../hooks/useScrollToTop";
+import {
+  activateInterviewFullscreenGuard,
+  clearInterviewFullscreenGuard,
+  requestInterviewFullscreen,
+} from "../utils/interviewFullscreenGuard";
+import { useRevealFullscreenWarning } from "../hooks/useRevealFullscreenWarning";
 
 // vector icons (simple, professional)
 const CameraIcon = () => (
@@ -18,9 +24,20 @@ const MicIcon = () => (
   </svg>
 );
 
-const LocationIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-    <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 110-5 2.5 2.5 0 010 5z" />
+const FullscreenIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+    <path d="M16 3h3a2 2 0 0 1 2 2v3" />
+    <path d="M8 21H5a2 2 0 0 1-2-2v-3" />
+    <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+  </svg>
+);
+
+const BrowserIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10" />
+    <line x1="2" y1="12" x2="22" y2="12" />
+    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
   </svg>
 );
 
@@ -31,28 +48,36 @@ function Permissions() {
   const [permissions, setPermissions] = useState({
     camera: false,
     microphone: false,
-    location: false
+    fullscreen: Boolean(document.fullscreenElement),
+    browser: false
   });
   const [deniedPerm, setDeniedPerm] = useState({
     camera: false,
     microphone: false,
-    location: false
+    fullscreen: false,
+    browser: false
   });
   // loading state per permission so we can show cursor/spinner
   const [loadingPerm, setLoadingPerm] = useState({
     camera: false,
     microphone: false,
-    location: false
+    fullscreen: false,
+    browser: false
   });
   const [audioDb, setAudioDb] = useState(-Infinity);
+  const [browserName, setBrowserName] = useState("");
   const micStreamRef = useRef(null);
+  const fullscreenEverGrantedRef = useRef(Boolean(document.fullscreenElement));
+  const [fullscreenDialog, setFullscreenDialog] = useState(null);
+  const [showBackConfirmation, setShowBackConfirmation] = useState(false);
+  useRevealFullscreenWarning(Boolean(fullscreenDialog));
 
   const resetPermissionsState = () => {
-    setPermissions({ camera: false, microphone: false, location: false });
-    setDeniedPerm({ camera: false, microphone: false, location: false });
-    setLoadingPerm({ camera: false, microphone: false, location: false });
+    setPermissions({ camera: false, microphone: false, fullscreen: Boolean(document.fullscreenElement), browser: false });
+    setDeniedPerm({ camera: false, microphone: false, fullscreen: false, browser: false });
+    setLoadingPerm({ camera: false, microphone: false, fullscreen: false, browser: false });
+    setBrowserName("");
     setAudioDb(-Infinity);
-    setLocationInfo(null);
     if (micStreamRef.current) {
       micStreamRef.current.getTracks().forEach((t) => t.stop());
       micStreamRef.current = null;
@@ -93,7 +118,6 @@ function Permissions() {
     };
   }, [permissions.microphone]);
   const cameraStreamRef = useRef(null);
-  const [locationInfo, setLocationInfo] = useState(null);
 
   // reset each time page opens
   React.useEffect(() => {
@@ -162,71 +186,154 @@ function Permissions() {
     }
   };
 
-  const fetchAddress = async (lat, lng) => {
+  const requestFullscreen = async () => {
+    setLoadingPerm((l) => ({ ...l, fullscreen: true }));
+    setDeniedPerm((d) => ({ ...d, fullscreen: false }));
     try {
-      const resp = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`
-      );
-      const data = await resp.json();
-      // extract useful pieces if available
-      const address = data.address || {};
-      const display = data.display_name || "";
-      setLocationInfo((l) => ({ ...l, address: display, city: address.city || address.town || address.village || "", state: address.state || "", postcode: address.postcode || "" }));
-    } catch (e) {
-      // ignore
+      await requestInterviewFullscreen(document.documentElement);
+      activateInterviewFullscreenGuard();
+      fullscreenEverGrantedRef.current = Boolean(document.fullscreenElement);
+      setPermissions((p) => ({ ...p, fullscreen: Boolean(document.fullscreenElement) }));
+    } catch (err) {
+      setDeniedPerm((d) => ({ ...d, fullscreen: true }));
+      setPermissions((p) => ({ ...p, fullscreen: false }));
+      setFullscreenDialog({
+        type: "error",
+        title: "Fullscreen Not Enabled",
+        message: "Fullscreen could not be enabled. Please allow fullscreen and try again."
+      });
+    } finally {
+      setLoadingPerm((l) => ({ ...l, fullscreen: false }));
     }
   };
 
-  const requestLocation = () => {
-    setLoadingPerm((l) => ({ ...l, location: true }));
-    if (!navigator.geolocation) {
-      alert("Geolocation not supported.");
-      setLoadingPerm((l) => ({ ...l, location: false }));
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const { latitude, longitude } = pos.coords;
-        const lat = latitude.toFixed(4);
-        const lng = longitude.toFixed(4);
-        setLocationInfo({
-          lat,
-          lng,
-          time: new Date().toLocaleString()
-        });
-        setPermissions((p) => ({ ...p, location: true }));
-        fetchAddress(lat, lng);
-        setLoadingPerm((l) => ({ ...l, location: false }));
-      },
-      (err) => {
-        alert("Location permission denied.");
-        setLoadingPerm((l) => ({ ...l, location: false }));
-      }
-    );
+  const openFullscreenConfirm = () => {
+    if (permissions.fullscreen || loadingPerm.fullscreen) return;
+    setFullscreenDialog({
+      type: "confirm",
+      title: "Enter Fullscreen",
+      message: "The interview setup will enter fullscreen mode. Please stay in fullscreen until the interview is completed."
+    });
+  };
+
+  const confirmFullscreen = () => {
+    setFullscreenDialog(null);
+    requestFullscreen();
   };
 
   // navigation helpers for footer buttons
   const goHome = () => {
+    clearInterviewFullscreenGuard();
     resetPermissionsState();
     navigate("/");
   };
   const goBack = () => {
-    resetPermissionsState();
-    navigate(-1);
-  };
-  const goProceed = () => {
-    if (allPermissionsGranted) {
-      navigate("/interview", { state: location.state || {} });
+    const isFullscreen = Boolean(document.fullscreenElement);
+    if (isFullscreen) {
+      // Show confirmation dialog if fullscreen is active
+      setShowBackConfirmation(true);
+    } else {
+      // If not in fullscreen, navigate back immediately
+      clearInterviewFullscreenGuard();
+      resetPermissionsState();
+      navigate(-1);
     }
   };
 
-  const allPermissionsGranted = permissions.camera && permissions.microphone && permissions.location;
+  const confirmBackNavigation = async () => {
+    // Exit fullscreen
+    if (document.fullscreenElement) {
+      await document.exitFullscreen().catch(() => {});
+    }
+    // Clear fullscreen guard and reset state
+    clearInterviewFullscreenGuard();
+    resetPermissionsState();
+    // Hide confirmation dialog and navigate back
+    setShowBackConfirmation(false);
+    navigate(-1);
+  };
+
+  const cancelBackNavigation = () => {
+    setShowBackConfirmation(false);
+  };
+
+  const detectBrowser = () => {
+    setLoadingPerm((l) => ({ ...l, browser: true }));
+    setDeniedPerm((d) => ({ ...d, browser: false }));
+    
+    setTimeout(() => {
+      const userAgent = navigator.userAgent;
+      let detected = "Unknown";
+      
+      if (userAgent.indexOf("Firefox") > -1) {
+        detected = "Firefox";
+      } else if (userAgent.indexOf("Chrome") > -1 && userAgent.indexOf("Chromium") === -1) {
+        detected = "Chrome";
+      } else if (userAgent.indexOf("Safari") > -1 && userAgent.indexOf("Chrome") === -1) {
+        detected = "Safari";
+      } else if (userAgent.indexOf("Edge") > -1 || userAgent.indexOf("Edg") > -1) {
+        detected = "Edge";
+      } else if (userAgent.indexOf("Opera") > -1 || userAgent.indexOf("OPR") > -1) {
+        detected = "Opera";
+      } else if (userAgent.indexOf("Chromium") > -1) {
+        detected = "Chromium";
+      }
+      
+      setBrowserName(detected);
+      setPermissions((p) => ({ ...p, browser: true }));
+      setLoadingPerm((l) => ({ ...l, browser: false }));
+    }, 500);
+  };
+
+  const goProceed = () => {
+    if (allPermissionsGranted) {
+      navigate("/instructions", { state: location.state || {} });
+    }
+  };
+
+  const allPermissionsGranted = permissions.camera && permissions.microphone && permissions.fullscreen && permissions.browser;
 
   // change cursor to wait when any permission is loading
   React.useEffect(() => {
     const anyLoading = Object.values(loadingPerm).some(Boolean);
     document.body.style.cursor = anyLoading ? "wait" : "default";
   }, [loadingPerm]);
+
+  // warn before leaving page when in fullscreen
+  React.useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      const isFullscreen = Boolean(document.fullscreenElement);
+      if (isFullscreen) {
+        e.preventDefault();
+        e.returnValue = "All submissions and saved data will be lost";
+        return "All submissions and saved data will be lost";
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
+
+  React.useEffect(() => {
+    const handleFullscreenChange = () => {
+      const isFullscreen = Boolean(document.fullscreenElement);
+      setPermissions((p) => ({ ...p, fullscreen: isFullscreen }));
+      if (isFullscreen) {
+        fullscreenEverGrantedRef.current = true;
+        setDeniedPerm((d) => ({ ...d, fullscreen: false }));
+      } else if (fullscreenEverGrantedRef.current) {
+        setDeniedPerm((d) => ({ ...d, fullscreen: true }));
+        setFullscreenDialog({
+          type: "warning",
+          title: "Fullscreen Exited",
+          message: "Fullscreen mode was exited. Please re-enter fullscreen before continuing."
+        });
+      }
+    };
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
 
   // compute audio bar color based on level
   const getAudioColor = (db) => {
@@ -265,16 +372,21 @@ function Permissions() {
   // gather some system info for the right panel
   const [sysInfo, setSysInfo] = useState({
     os: navigator.platform || "Unknown",
-    browser: navigator.userAgent.match(/(Chrome|Firefox|Safari|Edge)\/?\s*(\d+)/)?.[1] || "Browser",
+    browser: "Browser",
     dimension: `${window.innerWidth} x ${window.innerHeight}`,
     screen: `${window.screen.width} x ${window.screen.height}`,
     cookies: navigator.cookieEnabled ? "Enabled" : "Disabled",
     popup: "Enabled",
     download: "-- Mbps",
     upload: "-- Mbps",
-    location: "--",
     time: new Date().toLocaleTimeString()
   });
+
+  React.useEffect(() => {
+    if (browserName) {
+      setSysInfo((prev) => ({ ...prev, browser: browserName }));
+    }
+  }, [browserName]);
 
   React.useEffect(() => {
     const measureSpeed = async () => {
@@ -325,24 +437,8 @@ function Permissions() {
     };
   }, []);
 
-  // keep panel location synced when we obtain coords
-  React.useEffect(() => {
-    if (locationInfo) {
-      setSysInfo((s) => ({ ...s, location: `${locationInfo.lat}, ${locationInfo.lng}` }));
-    }
-  }, [locationInfo]);
-
-  // update the displayed time inside locationInfo every second
-  React.useEffect(() => {
-    if (!locationInfo) return;
-    const int = setInterval(() => {
-      setLocationInfo((l) => l ? { ...l, time: new Date().toLocaleString() } : l);
-    }, 1000);
-    return () => clearInterval(int);
-  }, [locationInfo]);
-
   return (
-    <div className="mock-page reveal">
+    <div className="mock-page reveal" style={{ minHeight: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       {/* No mini navbar on this page per request */}
       {/* overall status banner (only when every permission granted) */}
       {allPermissionsGranted && (
@@ -352,23 +448,23 @@ function Permissions() {
       )}
 
       {/* main two‑column section */}
-      <div style={{ display: "flex", flexWrap: "wrap", padding: 12, gap: 12, maxWidth: 1380, margin: "0 auto", width: "100%", alignItems: "stretch" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", padding: 16, gap: 16, maxWidth: 1440, margin: "0 auto", width: "100%", alignItems: "stretch", flex: "1 1 auto", minHeight: 0 }}>
         {/* left: system check list */}
-        <div style={{ flex: "1 1 300px", maxWidth: 600, overflowY: "auto", overflowX: "hidden" }}>
-          <div style={{ background: "white", padding: 12, borderRadius: 6, boxShadow: "0 2px 6px rgba(0,0,0,0.08)" }}>
-            <h2 style={{ marginTop: 0, fontSize: 16, marginBottom: 12, fontWeight: 700 }}>System Check + Verification Photo</h2>
+        <div style={{ flex: "1 1 420px", minWidth: 320, maxWidth: 640, display: "flex", minHeight: 0 }}>
+          <div style={{ background: "white", padding: 18, borderRadius: 6, boxShadow: "0 2px 6px rgba(0,0,0,0.08)", flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+            <h2 style={{ marginTop: 0, fontSize: 18, marginBottom: 16, fontWeight: 700 }}>System Check + Verification Photo</h2>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14, flex: 1, justifyContent: "space-evenly", minHeight: 0 }}>
               {/* camera */}
               <div
-                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12, gap: 6 }}
+                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 14, gap: 12, height: 40 }}
               >
                 <span className="perm-item" onClick={requestCamera} style={{cursor:'pointer'}}><CameraIcon className="perm-icon" /> Camera</span>
                 <button
                   className={`mock-btn grant-btn ${permissions.camera ? "granted" : deniedPerm.camera ? "denied" : ""}`}
                   disabled={permissions.camera || loadingPerm.camera}
                   onClick={requestCamera}
-                  style={{ cursor: loadingPerm.camera ? "wait" : "pointer", padding: "8px 14px", fontSize: 11 }}
+                  style={{ cursor: loadingPerm.camera ? "wait" : "pointer", fontSize: 12, minWidth: 60, height: 38 }}
                 >
                   {loadingPerm.camera ? <span className="spinner" /> : permissions.camera ? "✓" : deniedPerm.camera ? "✕" : "Grant"}
                 </button>
@@ -376,14 +472,14 @@ function Permissions() {
 
               {/* microphone */}
               <div
-                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12, gap: 6 }}
+                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 14, gap: 12, height: 40 }}
               >
                 <span className="perm-item" onClick={requestMicrophone} style={{cursor:'pointer'}}><MicIcon className="perm-icon" /> Microphone</span>
                 <button
                   className={`mock-btn grant-btn ${permissions.microphone ? "granted" : deniedPerm.microphone ? "denied" : ""}`}
                   disabled={permissions.microphone || loadingPerm.microphone}
                   onClick={requestMicrophone}
-                  style={{ cursor: loadingPerm.microphone ? "wait" : "pointer", padding: "8px 14px", fontSize: 11 }}
+                  style={{ cursor: loadingPerm.microphone ? "wait" : "pointer", fontSize: 12, minWidth: 60, height: 38 }}
                 >
                   {loadingPerm.microphone ? <span className="spinner" /> : permissions.microphone ? "✓" : deniedPerm.microphone ? "✕" : "Grant"}
                 </button>
@@ -410,57 +506,50 @@ function Permissions() {
               )}
 
               {/* browser */}
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12, gap: 6 }}>
-                <span>🌐 Browser</span>
-                <span style={{ color: "#10b981", fontWeight: 700 }}>✓</span>
-              </div>
-
-              {/* network */}
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12, gap: 6 }}>
-                <span>Your Network is Compatible</span>
-                <span style={{ color: "#10b981", fontWeight: 700 }}>✓</span>
-              </div>
-
-              {/* location */}
               <div
-                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12, gap: 6 }}
+                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 14, gap: 12, height: 40 }}
               >
-                <span className="perm-item"><LocationIcon className="perm-icon" />Location</span>
+                <span className="perm-item" onClick={detectBrowser} style={{cursor:'pointer'}}><BrowserIcon className="perm-icon" /> Browser</span>
                 <button
-                  className={`mock-btn grant-btn ${permissions.location ? "granted" : deniedPerm.location ? "denied" : ""}`}
-                  disabled={permissions.location || loadingPerm.location}
-                  onClick={requestLocation}
-                  style={{ cursor: loadingPerm.location ? "wait" : "pointer", padding: "8px 14px", fontSize: 11 }}
+                  className={`mock-btn grant-btn ${permissions.browser ? "granted" : deniedPerm.browser ? "denied" : ""}`}
+                  disabled={permissions.browser || loadingPerm.browser}
+                  onClick={detectBrowser}
+                  style={{ cursor: loadingPerm.browser ? "wait" : "pointer", fontSize: 12, minWidth: 60, height: 38 }}
                 >
-                  {loadingPerm.location ? <span className="spinner" /> : permissions.location ? "✓" : deniedPerm.location ? "✕" : "Grant"}
+                  {loadingPerm.browser ? <span className="spinner" /> : permissions.browser ? "✓" : deniedPerm.browser ? "✕" : "Check"}
                 </button>
               </div>
-              {locationInfo && (
-                <div style={{ marginTop: 6, fontSize: 10, color: "#444", lineHeight: 1.3 }}>
-                  <div>Lat: {locationInfo.lat}, Lng: {locationInfo.lng}</div>
-                  <div>Time: {locationInfo.time}</div>
-                  {locationInfo.address && (
-                    <div style={{ marginTop: 4 }}>
-                      <em>{locationInfo.address}</em>
-                    </div>
-                  )}
-                  {(locationInfo.city || locationInfo.state || locationInfo.postcode) && (
-                    <div style={{ marginTop: 4 }}>
-                      {locationInfo.city && <span>City: {locationInfo.city} </span>}
-                      {locationInfo.state && <span>State: {locationInfo.state} </span>}
-                      {locationInfo.postcode && <span>Pincode: {locationInfo.postcode}</span>}
-                    </div>
-                  )}
+
+              {/* fullscreen */}
+              <div
+                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 14, gap: 12, height: 40 }}
+              >
+                <span className="perm-item" onClick={openFullscreenConfirm} style={{ cursor: "pointer" }}>
+                  <FullscreenIcon className="perm-icon" /> Fullscreen
+                </span>
+                <button
+                  className={`mock-btn grant-btn ${permissions.fullscreen ? "granted" : deniedPerm.fullscreen ? "denied" : ""}`}
+                  disabled={permissions.fullscreen || loadingPerm.fullscreen}
+                  onClick={openFullscreenConfirm}
+                  style={{ cursor: loadingPerm.fullscreen ? "wait" : "pointer", fontSize: 12, minWidth: 60, height: 38 }}
+                >
+                  {loadingPerm.fullscreen ? <span className="spinner" /> : permissions.fullscreen ? "✓" : deniedPerm.fullscreen ? "✕" : "Grant"}
+                </button>
+              </div>
+              {deniedPerm.fullscreen && (
+                <div style={{ marginTop: 2, fontSize: 10, color: "#b91c1c", lineHeight: 1.3 }}>
+                  Fullscreen is required before starting the interview.
                 </div>
               )}
+
 
             </div>
           </div>
         </div>
 
         {/* right: video feed and info panels */}
-        <div style={{ flex: "1 1 300px", display: "flex", flexDirection: "column", gap: 10, overflowY: "auto", overflowX: "hidden" }}>
-          <div style={{ background: "white", padding: 6, borderRadius: 6, boxShadow: "0 2px 6px rgba(0,0,0,0.08)", flex: "0 0 300px", minHeight: 0 }}>
+        <div style={{ flex: "1 1 420px", minWidth: 320, display: "flex", flexDirection: "column", gap: 14, minHeight: 0 }}>
+          <div style={{ background: "white", padding: 8, borderRadius: 6, boxShadow: "0 2px 6px rgba(0,0,0,0.08)", flex: "1 1 0", minHeight: 260 }}>
             <video
               ref={videoRef}
               style={{ width: "100%", borderRadius: 4, display: "block", height: "100%" }}
@@ -470,21 +559,20 @@ function Permissions() {
             />
           </div>
 
-          <div style={{ background: "white", padding: 12, borderRadius: 6, boxShadow: "0 2px 6px rgba(0,0,0,0.08)" }}>
-            <h4 style={{ marginTop: 0, fontSize: 12, marginBottom: 8, fontWeight: 700 }}>System Info</h4>
-            <div style={{ fontSize: 11, lineHeight: 1.3 }}>
+          <div style={{ background: "white", padding: 16, borderRadius: 6, boxShadow: "0 2px 6px rgba(0,0,0,0.08)", flex: "0 0 auto" }}>
+            <h4 style={{ marginTop: 0, fontSize: 14, marginBottom: 10, fontWeight: 700 }}>System Info</h4>
+            <div style={{ fontSize: 12, lineHeight: 1.45 }}>
               <div><strong>OS :</strong> {sysInfo.os}</div>
               <div><strong>Dimension :</strong> {sysInfo.dimension}</div>
               <div><strong>Browser :</strong> {sysInfo.browser}</div>
               <div><strong>Cookies :</strong> {sysInfo.cookies}</div>
-              <div><strong>Location :</strong> {sysInfo.location}</div>
               <div><strong>Time :</strong> {sysInfo.time}</div>
             </div>
           </div>
 
-          <div style={{ background: "white", padding: 12, borderRadius: 6, boxShadow: "0 2px 6px rgba(0,0,0,0.08)" }}>
-            <h4 style={{ marginTop: 0, fontSize: 12, marginBottom: 8, fontWeight: 700 }}>Internet Bandwidth</h4>
-            <div style={{ fontSize: 11, lineHeight: 1.3 }}>
+          <div style={{ background: "white", padding: 16, borderRadius: 6, boxShadow: "0 2px 6px rgba(0,0,0,0.08)", flex: "0 0 auto" }}>
+            <h4 style={{ marginTop: 0, fontSize: 14, marginBottom: 10, fontWeight: 700 }}>Internet Bandwidth</h4>
+            <div style={{ fontSize: 12, lineHeight: 1.45 }}>
               <div><strong>Download speed :</strong> {sysInfo.download}</div>
               <div><strong>Upload speed :</strong> {sysInfo.upload}</div>
             </div>
@@ -493,13 +581,145 @@ function Permissions() {
       </div>
 
       {/* footer buttons */}
-      <div style={{ marginTop: 0, textAlign: "center", display: "flex", justifyContent: "center", gap: 10, paddingBottom: 12 }}>
+      <div style={{ flex: "0 0 auto", marginTop: 0, textAlign: "center", display: "flex", justifyContent: "center", gap: 12, padding: "0 12px 16px" }}>
         <button className="go-back-btn" onClick={goHome} style={{ padding: "8px 16px", fontSize: 12 }}>🏠 Home</button>
         <button className="go-back-btn" onClick={goBack} style={{ padding: "8px 16px", fontSize: 12 }}>← Back</button>
-        <button className="mock-btn footer-btn" onClick={goProceed} disabled={!allPermissionsGranted} style={{ padding: "8px 16px", fontSize: 12 }}>
+        <button className="mock-btn footer-btn" onClick={goProceed} disabled={!allPermissionsGranted} style={{ padding: "10px 20px", fontSize: 12 }}>
           Proceed
         </button>
       </div>
+
+      {fullscreenDialog && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="fullscreen-dialog-title"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+            overflowY: "auto",
+            background: "rgba(15, 23, 42, 0.38)"
+          }}
+        >
+          <div
+            data-fullscreen-warning
+            tabIndex="-1"
+            style={{
+              width: "min(440px, 100%)",
+              maxHeight: "calc(100vh - 40px)",
+              overflowY: "auto",
+              background: "#ffffff",
+              border: "1px solid #bfdbfe",
+              borderRadius: 8,
+              boxShadow: "0 24px 70px rgba(15, 23, 42, 0.24)",
+              padding: 22,
+              textAlign: "center"
+            }}
+          >
+            <div
+              style={{
+                width: 46,
+                height: 46,
+                borderRadius: "50%",
+                margin: "0 auto 12px",
+                display: "grid",
+                placeItems: "center",
+                color: fullscreenDialog.type === "warning" ? "#b45309" : fullscreenDialog.type === "error" ? "#b91c1c" : "#1e3a8a",
+                background: fullscreenDialog.type === "warning" ? "#fef3c7" : fullscreenDialog.type === "error" ? "#fee2e2" : "#dbeafe"
+              }}
+            >
+              <FullscreenIcon />
+            </div>
+            <h3 id="fullscreen-dialog-title" style={{ margin: "0 0 8px", color: "#1e3a8a", fontSize: 20, fontWeight: 800 }}>
+              {fullscreenDialog.title}
+            </h3>
+            <p style={{ margin: "0 auto 18px", color: "#334155", fontSize: 14, lineHeight: 1.55, maxWidth: 360 }}>
+              {fullscreenDialog.message}
+            </p>
+            <div style={{ display: "flex", justifyContent: "center", gap: 10, flexWrap: "wrap" }}>
+              {fullscreenDialog.type === "confirm" ? (
+                <>
+                  <button
+                    type="button"
+                    className="go-back-btn"
+                    onClick={() => setFullscreenDialog(null)}
+                    style={{ padding: "10px 18px", fontSize: 12 }}
+                  >
+                    Cancel Interview Setup
+                  </button>
+                  <button
+                    type="button"
+                    className="mock-btn footer-btn"
+                    onClick={confirmFullscreen}
+                    style={{ padding: "10px 20px", fontSize: 12 }}
+                  >
+                    Enter Fullscreen
+                  </button>
+                </>
+              ) : fullscreenDialog.type === "warning" ? (
+                <>
+                  <button
+                    type="button"
+                    className="go-back-btn"
+                    onClick={goHome}
+                    style={{ padding: "10px 18px", fontSize: 12 }}
+                  >
+                    Cancel Interview Setup
+                  </button>
+                  <button
+                    type="button"
+                    className="mock-btn footer-btn"
+                    onClick={() => {
+                      setFullscreenDialog(null);
+                      requestFullscreen();
+                    }}
+                    style={{ padding: "10px 20px", fontSize: 12 }}
+                  >
+                    Stay in Fullscreen
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="mock-btn footer-btn"
+                  onClick={() => setFullscreenDialog(null)}
+                  style={{ padding: "10px 20px", fontSize: 12 }}
+                >
+                  Okay
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Back Navigation Confirmation Dialog */}
+      {showBackConfirmation && (
+        <div className="voice-ai-modal-overlay">
+          <div className="voice-ai-modal-card" data-back-confirmation tabIndex="-1">
+            <div className="voice-ai-modal-eyebrow">Exit Fullscreen</div>
+            <h2 className="voice-ai-modal-title">
+              Are you sure you want to exit fullscreen and go back?
+            </h2>
+            <p className="voice-ai-modal-copy">
+              The interview setup will be cancelled and you will exit fullscreen mode.
+            </p>
+            <div className="voice-ai-modal-actions">
+              <button className="go-back-btn" onClick={cancelBackNavigation}>
+                Stay in Fullscreen
+              </button>
+              <button className="mock-btn" onClick={confirmBackNavigation}>
+                Exit & Go Back
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
