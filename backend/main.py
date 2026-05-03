@@ -34,6 +34,9 @@ from auth_utils import (
     hash_password,
     verify_password,
     create_token,
+    create_email_verification_token,
+    send_verification_email,
+    verify_email_token,
     SECRET_KEY,
     ALGORITHM
 )
@@ -3573,19 +3576,35 @@ async def register(
             detail="User already exists"
         )
 
+    # Generate verification token
+    verification_token = create_email_verification_token(email)
+    
     user = {
         "first_name": first_name.strip(),
         "last_name": last_name.strip(),
         "email": email,
         "hashed_password": hash_password(password),
-        "profile_image": None
+        "profile_image": None,
+        "is_verified": False,
+        "verification_token": verification_token,
+        "verification_token_expires": datetime.utcnow() + timedelta(hours=24),
+        "created_at": datetime.utcnow()
     }
 
     result = await users_collection.insert_one(user)
 
+    # Send verification email
+    frontend_base_url = os.getenv("REACT_APP_FRONTEND_BASE", "http://localhost:3000")
+    verification_link = f"{frontend_base_url}/verify-email?token={verification_token}&email={email}"
+    
+    email_sent = send_verification_email(email, verification_link)
+
     return {
-        "status": "USER REGISTERED",
-        "id": str(result.inserted_id)
+        "status": "REGISTRATION SUCCESSFUL",
+        "message": "Please check your email to verify your account",
+        "id": str(result.inserted_id),
+        "email": email,
+        "email_sent": email_sent
     }
 
 # ================= LOGIN =================
@@ -3606,6 +3625,13 @@ async def login(
             status_code=400,
             detail="Invalid password"
         )
+    
+    # Check if email is verified
+    if not user.get("is_verified", False):
+        raise HTTPException(
+            status_code=403,
+            detail="Email not verified. Please check your email for verification link."
+        )
 
     token = create_token({
         "user_id": str(user["_id"]),
@@ -3623,7 +3649,124 @@ async def login(
         }
     }
 
-# ================= GOOGLE LOGIN =================
+# ================= EMAIL VERIFICATION =================
+@app.post("/verify-email")
+async def verify_email(
+    token: str = Body(...),
+    email: str = Body(...)
+):
+    """Verify user email with token"""
+    user = await users_collection.find_one({"email": email})
+    
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="User not found"
+        )
+    
+    if user.get("is_verified"):
+        raise HTTPException(
+            status_code=400,
+            detail="Email already verified"
+        )
+    
+    # Check if token matches
+    if user.get("verification_token") != token:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid verification token"
+        )
+    
+    # Check if token expired
+    expires_at = user.get("verification_token_expires")
+    if expires_at and datetime.utcnow() > expires_at:
+        raise HTTPException(
+            status_code=400,
+            detail="Verification token expired. Please request a new one."
+        )
+    
+    # Update user to verified
+    await users_collection.update_one(
+        {"_id": user["_id"]},
+        {
+            "$set": {
+                "is_verified": True,
+                "verification_token": None,
+                "verification_token_expires": None
+            }
+        }
+    )
+    
+    # Create login token
+    token = create_token({
+        "user_id": str(user["_id"]),
+        "email": user["email"]
+    })
+    
+    return {
+        "status": "Email verified successfully",
+        "access_token": token,
+        "user": {
+            "id": str(user["_id"]),
+            "email": user["email"],
+            "first_name": user.get("first_name"),
+            "last_name": user.get("last_name"),
+            "profile_image": user.get("profile_image"),
+            "is_verified": True
+        }
+    }
+
+@app.post("/resend-verification-email")
+async def resend_verification_email(
+    email: str = Body(...)
+):
+    """Resend verification email"""
+    user = await users_collection.find_one({"email": email})
+    
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="User not found"
+        )
+    
+    if user.get("is_verified"):
+        raise HTTPException(
+            status_code=400,
+            detail="Email already verified"
+        )
+    
+    # Generate new verification token
+    verification_token = create_email_verification_token(email)
+    
+    # Update user with new token
+    await users_collection.update_one(
+        {"_id": user["_id"]},
+        {
+            "$set": {
+                "verification_token": verification_token,
+                "verification_token_expires": datetime.utcnow() + timedelta(hours=24)
+            }
+        }
+    )
+    
+    # Send verification email
+    frontend_base_url = os.getenv("REACT_APP_FRONTEND_BASE", "http://localhost:3000")
+    verification_link = f"{frontend_base_url}/verify-email?token={verification_token}&email={email}"
+    
+    email_sent = send_verification_email(email, verification_link)
+    
+    if not email_sent:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to send verification email"
+        )
+    
+    return {
+        "status": "Verification email sent",
+        "message": "Check your email for verification link"
+    }
+
+
 class GoogleTokenRequest(BaseModel):
     """Request body for Google OAuth login"""
     token: str
@@ -3668,13 +3811,16 @@ async def google_login(request: GoogleTokenRequest):
         
         if not user:
             # Create new user from Google profile
+            # Google users are automatically verified since Google validates the email
             user = {
                 "first_name": first_name,
                 "last_name": last_name,
                 "email": email,
                 "hashed_password": None,  # No password for OAuth users
                 "profile_image": profile_image,
-                "auth_provider": "google"
+                "auth_provider": "google",
+                "is_verified": True,  # Automatically verified for Google OAuth
+                "created_at": datetime.utcnow()
             }
             result = await users_collection.insert_one(user)
             user["_id"] = result.inserted_id
@@ -3686,6 +3832,14 @@ async def google_login(request: GoogleTokenRequest):
                     {"$set": {"profile_image": profile_image}}
                 )
                 user["profile_image"] = profile_image
+            
+            # Ensure Google users are marked as verified
+            if not user.get("is_verified"):
+                await users_collection.update_one(
+                    {"_id": user["_id"]},
+                    {"$set": {"is_verified": True}}
+                )
+                user["is_verified"] = True
         
         # Create JWT token
         jwt_token = create_token({

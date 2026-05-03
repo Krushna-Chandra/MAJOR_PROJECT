@@ -99,7 +99,8 @@ function Auth() {
           email,
           password,
         });
-        alert("Registered successfully. Please sign in.");
+        // Show verification pending message
+        alert(`Registration successful! We've sent a verification email to ${email}. Please check your inbox and click the verification link to complete your signup.`);
         clearFields();
         setIsLogin(true);
         setLoading(false);

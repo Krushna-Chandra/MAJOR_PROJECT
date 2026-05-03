@@ -6,6 +6,7 @@ import Footer from "./components/Footer";
 /* MAIN PAGES */
 import Home from "./pages/Home";
 import Auth from "./pages/Auth";
+import VerifyEmail from "./pages/VerifyEmail";
 import Instructions from "./pages/Instructions";
 import Permissions from "./pages/Permissions";
 import Interview from "./pages/Interview";
@@ -118,6 +119,7 @@ function AppRoutes({ routeLocation }) {
       {/* ---------------- PUBLIC ROUTES ---------------- */}
       <Route path="/" element={<Home />} />
       <Route path="/auth" element={<Auth />} />
+      <Route path="/verify-email" element={<VerifyEmail />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/reset-password" element={<ResetPassword />} />
 
