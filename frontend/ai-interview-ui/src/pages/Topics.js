@@ -141,7 +141,7 @@ function Topics() {
   const [customQuestionCount, setCustomQuestionCount] = React.useState("");
   const [practiceType, setPracticeType] = React.useState("practice");
   const [interviewTime, setInterviewTime] = React.useState(5);
-  const [timeModeValue, setTimeModeValue] = React.useState("");
+  const [timeModeValue, setTimeModeValue] = React.useState(5);
   const selectionRef = React.useRef(null);
 
   const modeOptions =
@@ -178,7 +178,7 @@ function Topics() {
     setCustomQuestionCount("");
     setPracticeType("practice");
     setInterviewTime(5);
-    setTimeModeValue("");
+    setTimeModeValue(5);
     setSelectedRound(nextRound);
   }, []);
 
@@ -730,7 +730,12 @@ function Topics() {
                   Question Mode
                 </button>
                 <button
-                  onClick={() => !isLocked && setConfigMode("time")}
+                  onClick={() => {
+                    if (!isLocked) {
+                      setConfigMode("time");
+                      setTimeModeValue((current) => Number(current) || 5);
+                    }
+                  }}
                   disabled={isLocked}
                   style={{
                     padding: "8px 14px",

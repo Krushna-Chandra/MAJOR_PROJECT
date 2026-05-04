@@ -23,6 +23,34 @@ export const safeText = (value) => {
   return clean(String(value));
 };
 
+export const safeCodeText = (value) => {
+  if (value == null) return "";
+  const normalized = String(value).replace(/\r\n/g, "\n").trim();
+  if (!normalized || normalized.includes("\n")) {
+    return normalized;
+  }
+
+  const looksLikeCode =
+    /(import |from |def |class |if __name__|print\(|return |const |let |var |function |public class |#include )/.test(normalized);
+  if (!looksLikeCode) {
+    return normalized;
+  }
+
+  let formatted = normalized
+    .replace(/\s+(def\s+)/g, "\n$1")
+    .replace(/\s+(class\s+)/g, "\n$1")
+    .replace(/\s+(if __name__\s*==\s*)/g, "\n\n$1")
+    .replace(/\s+(for\s+)/g, "\n    $1")
+    .replace(/\s+(while\s+)/g, "\n    $1")
+    .replace(/\s+(if\s+)/g, "\n    $1")
+    .replace(/\s+(elif\s+)/g, "\n    $1")
+    .replace(/\s+(else:)/g, "\n    $1")
+    .replace(/\s+(return\s+)/g, "\n    $1")
+    .replace(/\s+(print\()/g, "\n$1");
+
+  return formatted.trim();
+};
+
 export const safeTextList = (value) => {
   if (!Array.isArray(value)) return [];
   return value.map((item) => safeText(item)).filter(Boolean);
@@ -120,7 +148,8 @@ export const normalizeEvaluation = (item) => ({
   question: safeText(item?.question),
   question_type: safeText(item?.question_type) || "practical",
   interview_phase: safeText(item?.interview_phase),
-  answer: safeText(item?.answer),
+  answer: safeCodeText(item?.answer),
+  reference_answer: safeCodeText(item?.reference_answer),
   feedback: safeText(item?.feedback),
   strengths: safeTextList(item?.strengths),
   gaps: safeTextList(item?.gaps),
@@ -205,6 +234,11 @@ export const normalizeReport = (report, fallbackContext = {}, fallbackUser = nul
     strongest_questions: safeTextList(report?.strongest_questions),
     needs_work_questions: safeTextList(report?.needs_work_questions),
     score_breakdown: normalizeScoreBreakdown(report?.score_breakdown),
+    skills_breakdown: report?.skills_breakdown && typeof report.skills_breakdown === "object" ? report.skills_breakdown : null,
+    top_skills: safeTextList(report?.top_skills),
+    weakest_skills: safeTextList(report?.weakest_skills),
+    avg_difficulty_reached: safeText(report?.avg_difficulty_reached),
+    adaptive_insights: report?.adaptive_insights && typeof report.adaptive_insights === "object" ? report.adaptive_insights : null,
     answers: safeTextList(report?.answers),
     evaluations,
     question_outline: normalizeQuestionOutline(report?.question_outline || report?.questions),

@@ -10,7 +10,7 @@ from email.message import EmailMessage
 from io import BytesIO
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict
+from typing import Any, Dict, List
 import numpy as np
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
@@ -43,6 +43,7 @@ from auth_utils import (
 from coding_ai import (
     build_fallback_coding_review,
     evaluate_coding_submission,
+    generate_reference_solution,
     generate_coding_challenge,
     get_coding_runtime_status,
     merge_execution_results,
@@ -3771,6 +3772,23 @@ class GoogleTokenRequest(BaseModel):
     """Request body for Google OAuth login"""
     token: str
 
+@app.get("/auth/google-client-id")
+async def google_client_id():
+    """
+    Return the public Google OAuth client ID used by the frontend.
+    """
+    from config import load_backend_env
+    load_backend_env()
+
+    client_id = os.getenv("GOOGLE_CLIENT_ID")
+    if not client_id:
+        raise HTTPException(
+            status_code=500,
+            detail="Google OAuth not configured"
+        )
+
+    return {"client_id": client_id}
+
 @app.post("/auth/google-login")
 async def google_login(request: GoogleTokenRequest):
     """
@@ -4333,6 +4351,96 @@ async def extract_resume_interview_data(
         raise HTTPException(status_code=500, detail=f"Resume interview extraction failed: {exc}")
 
 # ================= INTERVIEW RESULTS =================
+def _safe_report_score(value: Any) -> int:
+    try:
+        numeric = int(round(float(value)))
+    except (TypeError, ValueError):
+        numeric = 0
+    return max(0, min(100, numeric))
+
+
+def _safe_report_text_list(value: Any) -> List[str]:
+    if not isinstance(value, list):
+        return []
+    result = []
+    for item in value:
+        text = str(item or "").strip()
+        if text:
+            result.append(text)
+    return result
+
+
+def _ground_saved_report(report: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(report, dict):
+        return report
+    evaluations = [
+        item for item in report.get("evaluations", [])
+        if isinstance(item, dict) and item.get("count_towards_score", True)
+    ]
+    if not evaluations:
+        grounded = dict(report)
+        grounded["score"] = 0
+        grounded["overall_score"] = 0
+        grounded["top_strengths"] = ["No evaluated answers were captured, so strengths cannot be measured yet."]
+        grounded["improvement_areas"] = [
+            "Complete scored interview questions with clear answers to receive an accurate report."
+        ]
+        grounded["strongest_questions"] = []
+        grounded["needs_work_questions"] = []
+        grounded["summary"] = (
+            "No scored interview answers were available for this report, so the system cannot make a reliable "
+            "performance claim."
+        )
+        return grounded
+
+    scores = [_safe_report_score(item.get("score")) for item in evaluations]
+    overall_score = int(round(sum(scores) / len(scores))) if scores else 0
+    strong_questions = [
+        str(item.get("question") or "").strip()
+        for item in evaluations
+        if _safe_report_score(item.get("score")) >= 75 and str(item.get("question") or "").strip()
+    ][:3]
+    weak_questions = [
+        str(item.get("question") or "").strip()
+        for item in evaluations
+        if _safe_report_score(item.get("score")) < 60 and str(item.get("question") or "").strip()
+    ][:3]
+
+    strengths = []
+    improvements = []
+    for item in evaluations:
+        if _safe_report_score(item.get("score")) >= 60:
+            strengths.extend(_safe_report_text_list(item.get("strengths")))
+        improvements.extend(_safe_report_text_list(item.get("gaps")))
+        improvements.extend(_safe_report_text_list(item.get("suggestions")))
+
+    def unique(values: List[str], limit: int = 3) -> List[str]:
+        seen = set()
+        output = []
+        for value in values:
+            text = str(value or "").strip()
+            key = text.lower().rstrip(".")
+            if not text or key in seen or key == "you provided a direct spoken response to the question":
+                continue
+            seen.add(key)
+            output.append(text)
+            if len(output) >= limit:
+                break
+        return output
+
+    grounded = dict(report)
+    grounded["score"] = overall_score
+    grounded["overall_score"] = overall_score
+    grounded["strongest_questions"] = strong_questions
+    grounded["needs_work_questions"] = weak_questions
+    grounded["top_strengths"] = unique(strengths) or (
+        ["No reliable interview strength was demonstrated yet from the evaluated answers."]
+        if overall_score < 40 else report.get("top_strengths", [])
+    )
+    grounded["improvement_areas"] = unique(improvements) or report.get("improvement_areas", [])
+    return grounded
+
+
 @app.post("/interview-result")
 async def save_interview_result(
     payload: dict = Body(...),
@@ -4369,6 +4477,11 @@ async def save_interview_result(
             "strongest_questions": payload.get("strongest_questions", []),
             "needs_work_questions": payload.get("needs_work_questions", []),
             "score_breakdown": payload.get("score_breakdown"),
+            "skills_breakdown": payload.get("skills_breakdown"),
+            "top_skills": payload.get("top_skills", []),
+            "weakest_skills": payload.get("weakest_skills", []),
+            "avg_difficulty_reached": payload.get("avg_difficulty_reached"),
+            "adaptive_insights": payload.get("adaptive_insights"),
             "answers": payload.get("answers", []),
             "evaluations": payload.get("evaluations", []),
             "questions_answered": payload.get("questions_answered", 0),
@@ -4378,6 +4491,7 @@ async def save_interview_result(
             "timestamp": payload.get("timestamp") or now,
             "completed_at": payload.get("completed_at") or now,
         }
+        interview_result = _ground_saved_report(interview_result)
 
         result = await users_collection.update_one(
             {"_id": current_user["_id"]},
@@ -4481,9 +4595,11 @@ async def submit_coding_solution(payload: dict = Body(...)):
             if fast_feedback
             else await evaluate_coding_submission(challenge, language, source_code, execution)
         )
+        reference_solution = await generate_reference_solution(challenge, language)
         return {
             "execution": execution,
             "review": review,
+            "reference_solution": reference_solution,
         }
     except ProviderError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -4614,6 +4730,11 @@ async def complete_ai_interview(
                         "strongest_questions": summary.get("strongest_questions", []),
                         "needs_work_questions": summary.get("needs_work_questions", []),
                         "score_breakdown": summary.get("score_breakdown"),
+                        "skills_breakdown": summary.get("skills_breakdown"),
+                        "top_skills": summary.get("top_skills", []),
+                        "weakest_skills": summary.get("weakest_skills", []),
+                        "avg_difficulty_reached": summary.get("avg_difficulty_reached"),
+                        "adaptive_insights": summary.get("adaptive_insights"),
                         "providers": summary.get("providers"),
                         "answers": session.get("answers", []),
                         "evaluations": session.get("evaluations", []),
@@ -4622,6 +4743,7 @@ async def complete_ai_interview(
                         "question_outline": session.get("question_outline", summary.get("questions", [])),
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
+                    interview_result = _ground_saved_report(interview_result)
 
                     await users_collection.update_one(
                         {"_id": current_user["_id"]},
@@ -4662,7 +4784,7 @@ async def get_interview_reports(authorization: str = Header(...)):
         token = authorization.replace("Bearer ", "")
         current_user = await get_current_user(token)
         reports = current_user.get("interview_results", [])
-        normalized_reports = list(reversed(reports))
+        normalized_reports = [_ground_saved_report(report) for report in reversed(reports)]
         return {"reports": normalized_reports}
     except HTTPException:
         raise
@@ -4681,7 +4803,7 @@ async def get_interview_report(session_id: str, authorization: str = Header(...)
         if not match:
             raise HTTPException(status_code=404, detail="Interview report not found")
 
-        return {"report": match}
+        return {"report": _ground_saved_report(match)}
     except HTTPException:
         raise
     except Exception as exc:

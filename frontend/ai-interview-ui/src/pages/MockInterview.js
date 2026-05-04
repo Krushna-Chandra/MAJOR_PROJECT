@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import "../App.css";
 import { useScrollToTop } from "../hooks/useScrollToTop";
 import MiniNavbar from "../components/MiniNavbar";
@@ -14,7 +14,9 @@ import {
 function MockInterview() {
   useScrollToTop();
   const navigate = useNavigate();
+  const location = useLocation();
   const rolesList = MOCK_JOB_ROLES;
+  const restoredSetup = location.state?.mockSetupState || null;
 
   // warn before leaving page when user tries to navigate away
   React.useEffect(() => {
@@ -28,18 +30,18 @@ function MockInterview() {
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, []);
 
-  const [showSetup, setShowSetup] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [selectedOptions, setSelectedOptions] = useState([]);
-  const [experience, setExperience] = useState("");
-  const [configMode, setConfigMode] = useState(null);
-  const [questionCount, setQuestionCount] = useState(10);
-  const [customQuestionCount, setCustomQuestionCount] = useState("");
-  const [practiceType, setPracticeType] = useState("practice");
-  const [interviewTime, setInterviewTime] = useState(5);
-  const [timeModeValue, setTimeModeValue] = useState("");
-  const [confirmedSelection, setConfirmedSelection] = useState(null);
-  const [isLocked, setIsLocked] = useState(false);
+  const [showSetup, setShowSetup] = useState(Boolean(location.state?.showSetup || restoredSetup));
+  const [searchTerm, setSearchTerm] = useState(restoredSetup?.searchTerm || "");
+  const [selectedOptions, setSelectedOptions] = useState(restoredSetup?.selectedOptions || []);
+  const [experience, setExperience] = useState(restoredSetup?.experience || "");
+  const [configMode, setConfigMode] = useState(restoredSetup?.configMode || null);
+  const [questionCount, setQuestionCount] = useState(restoredSetup?.questionCount || 10);
+  const [customQuestionCount, setCustomQuestionCount] = useState(restoredSetup?.customQuestionCount || "");
+  const [practiceType, setPracticeType] = useState(restoredSetup?.practiceType || "practice");
+  const [interviewTime, setInterviewTime] = useState(restoredSetup?.interviewTime || 5);
+  const [timeModeValue, setTimeModeValue] = useState(restoredSetup?.timeModeValue || 5);
+  const [confirmedSelection, setConfirmedSelection] = useState(restoredSetup?.confirmedSelection || null);
+  const [isLocked, setIsLocked] = useState(Boolean(restoredSetup?.isLocked));
   const setupRef = useRef(null);
 
   useEffect(() => {
@@ -69,7 +71,7 @@ function MockInterview() {
     setCustomQuestionCount("");
     setPracticeType("practice");
     setInterviewTime(5);
-    setTimeModeValue("");
+    setTimeModeValue(5);
     setConfirmedSelection(null);
     setIsLocked(false);
   };
@@ -105,6 +107,21 @@ function MockInterview() {
     });
     setIsLocked(true);
   };
+
+  const buildReturnSetupState = () => ({
+    showSetup: true,
+    searchTerm,
+    selectedOptions,
+    experience,
+    configMode,
+    questionCount,
+    customQuestionCount,
+    practiceType,
+    interviewTime,
+    timeModeValue,
+    confirmedSelection,
+    isLocked,
+  });
 
   return (
     <div className="mock-page reveal">
@@ -344,7 +361,10 @@ function MockInterview() {
                       Question Mode
                     </button>
                     <button
-                      onClick={() => setConfigMode('time')}
+                      onClick={() => {
+                        setConfigMode('time');
+                        setTimeModeValue((current) => Number(current) || 5);
+                      }}
                       style={{
                         padding: '8px 14px',
                         borderRadius: 6,
@@ -430,7 +450,7 @@ function MockInterview() {
                   Choose sample time (minutes):
                 </label>
                 <select
-                  value={timeModeValue || interviewTime}
+                  value={timeModeValue}
                   onChange={(e) => setTimeModeValue(Number(e.target.value))}
                   disabled={isLocked}
                   style={{
@@ -631,6 +651,11 @@ function MockInterview() {
                         practiceType: confirmedSelection.practiceType,
                         interviewModeTime: confirmedSelection.interviewModeTime,
                         timeModeInterval: confirmedSelection.timeModeInterval,
+                        returnTo: "/mock-interview",
+                        returnState: {
+                          showSetup: true,
+                          mockSetupState: buildReturnSetupState(),
+                        },
                       }
                     })
                   }>

@@ -7,7 +7,6 @@ import {
   CalendarDays,
   CheckCircle2,
   CircleAlert,
-  Clock3,
   Download,
   Home,
   Layers3,
@@ -21,8 +20,8 @@ import {
 import "../App.css";
 import { useScrollToTop } from "../hooks/useScrollToTop";
 import {
-  formatProviderName,
   normalizeReport,
+  safeCodeText,
   safeErrorText,
   safeScore,
   safeText,
@@ -31,50 +30,73 @@ import {
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || "http://127.0.0.1:8000";
 
-function countSignalMatches(sourceText, keywords) {
-  return keywords.reduce((total, keyword) => total + (sourceText.includes(keyword) ? 1 : 0), 0);
+function averageScores(values) {
+  const scores = values
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
+  if (!scores.length) return null;
+  return safeScore(scores.reduce((total, value) => total + value, 0) / scores.length);
 }
 
-function deriveSkillSignals(report) {
-  const categories = [
-    { label: "Communication", keywords: ["communication", "clarity", "explain", "articulate", "structure", "concise"] },
-    { label: "Leadership", keywords: ["leadership", "ownership", "stakeholder", "team", "collaboration", "mentor"] },
-    { label: "Problem Solving", keywords: ["problem", "algorithm", "debug", "solution", "approach", "analysis"] },
-    { label: "Decision Making", keywords: ["decision", "tradeoff", "judgment", "priority", "choose", "impact"] },
-    { label: "Time Mgmt", keywords: ["time", "deadline", "prioritize", "delivery", "planning", "schedule"] },
+function percentScore(numerator, denominator) {
+  const top = Number(numerator);
+  const bottom = Number(denominator);
+  if (!Number.isFinite(top) || !Number.isFinite(bottom) || bottom <= 0) return 0;
+  return safeScore((top / bottom) * 100);
+}
+
+function buildPerformanceDimensions(report) {
+  const evaluations = (report?.evaluations || []).filter((item) => item?.count_towards_score !== false);
+  const dimensions = [
+    { label: "Communication", reportKey: "communication", evaluationKey: "communication_score" },
+    { label: "Confidence", reportKey: "confidence", evaluationKey: "confidence_score" },
+    { label: "Problem Solving", reportKey: "problem_solving", evaluationKey: "problem_solving_score" },
+    { label: "Teamwork", reportKey: "teamwork", evaluationKey: "teamwork_score" },
+    { label: "Leadership", reportKey: "leadership", evaluationKey: "leadership_score" },
+    { label: "Readiness", reportKey: "hr_readiness", evaluationKey: "hr_readiness_score" },
   ];
 
-  const evaluations = (report?.evaluations || []).filter((item) => item?.count_towards_score !== false);
-  const reportText = safeText([
-    report?.summary,
-    ...(report?.top_strengths || []),
-    ...(report?.improvement_areas || []),
-    ...evaluations.flatMap((item) => [
-      item.feedback,
-      ...(item.strengths || []),
-      ...(item.gaps || []),
-      ...(item.matched_points || []),
-      ...(item.missed_points || []),
-    ]),
-  ]).toLowerCase();
+  const directDimensions = dimensions
+    .map((dimension) => {
+      const score = report?.score_breakdown?.[dimension.reportKey] != null
+        ? safeScore(report.score_breakdown[dimension.reportKey])
+        : averageScores(evaluations.map((item) => item?.[dimension.evaluationKey]));
+      return score == null
+        ? null
+        : {
+            label: dimension.label,
+            score,
+            actual: Math.max(0, Math.min(5, score / 20)),
+          };
+    })
+    .filter(Boolean);
 
-  return categories.map((category) => {
-    const rawScore = countSignalMatches(reportText, category.keywords);
-    const importance = Math.max(2, Math.min(5, rawScore + 2));
-    const actual = Math.max(
-      1,
-      Math.min(
-        5,
-        Math.round(((safeScore(report?.overall_score) / 100) * 3) + Math.max(0, importance - 2) * 0.35)
-      )
-    );
+  if (directDimensions.length >= 3) {
+    return directDimensions;
+  }
 
-    return {
-      label: category.label,
-      actual,
-      importance,
-    };
-  });
+  const reportedAnswered = Number(report?.questions_answered);
+  const answeredCount = Number.isFinite(reportedAnswered) && reportedAnswered >= 0 ? reportedAnswered : evaluations.length;
+  const totalQuestions = Number(report?.total_questions || report?.question_outline?.length || answeredCount);
+  const strongAnswerCount = evaluations.filter((item) => safeScore(item?.score) >= 75).length;
+  const matchedPoints = evaluations.flatMap((item) => safeTextList(item?.matched_points));
+  const missedPoints = evaluations.flatMap((item) => safeTextList(item?.missed_points));
+  const pointTotal = matchedPoints.length + missedPoints.length;
+
+  const groundedDimensions = [
+    { label: "Score Average", score: safeScore(report?.overall_score) },
+    { label: "Strong Answers", score: percentScore(strongAnswerCount, answeredCount) },
+    { label: "Completion", score: percentScore(answeredCount, totalQuestions) },
+  ];
+
+  if (pointTotal > 0) {
+    groundedDimensions.push({ label: "Covered Points", score: percentScore(matchedPoints.length, pointTotal) });
+  }
+
+  return groundedDimensions.map((item) => ({
+    ...item,
+    actual: Math.max(0, Math.min(5, item.score / 20)),
+  }));
 }
 
 function buildRadarPoints(values, radius, centerX, centerY) {
@@ -95,7 +117,6 @@ function RadarChart({ items = [] }) {
   const centerX = 170;
   const centerY = 160;
   const radius = 110;
-  const requiredPoints = buildRadarPoints(items.map((item) => item.importance), radius, centerX, centerY);
   const actualPoints = buildRadarPoints(items.map((item) => item.actual), radius, centerX, centerY);
 
   return (
@@ -124,20 +145,20 @@ function RadarChart({ items = [] }) {
           );
         })}
 
-        <polygon points={requiredPoints} className="report-radar-required" />
         <polygon points={actualPoints} className="report-radar-actual" />
       </svg>
 
       <div className="report-radar-legend">
-        <span><i className="report-radar-legend__required" /> Required skills</span>
-        <span><i className="report-radar-legend__actual" /> Actual skills</span>
+        <span><i className="report-radar-legend__actual" /> Evaluated performance</span>
       </div>
     </div>
   );
 }
 
 function ScoreBars({ items = [] }) {
-  if (!items.length) return null;
+  if (!items.length) {
+    return <div className="report-bullet-list">- No question-level scores were saved for this report.</div>;
+  }
   return (
     <div className="report-score-list">
       {items.map((item, index) => (
@@ -165,6 +186,18 @@ function MetricTile({ label, value, tone = "indigo" }) {
       <strong>{value}</strong>
     </div>
   );
+}
+
+function formatReportDate(report) {
+  const rawDate = safeText(report?.completed_at || report?.created_at || report?.timestamp);
+  if (!rawDate) return "Not recorded";
+
+  const numeric = Number(rawDate);
+  const parsed = Number.isFinite(numeric)
+    ? new Date(numeric < 10000000000 ? numeric * 1000 : numeric)
+    : new Date(rawDate);
+
+  return Number.isNaN(parsed.getTime()) ? "Not recorded" : parsed.toLocaleDateString("en-GB");
 }
 
 function formatBreakdownLabel(key) {
@@ -198,6 +231,41 @@ function formatRoundLabel(value) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+function getReportCategory(report) {
+  return safeText(report?.context?.category || report?.category || report?.interview_type || report?.type).toLowerCase();
+}
+
+function getReportTitle(report) {
+  return safeText(
+    report?.context?.job_role ||
+    report?.context?.primary_language ||
+    report?.context?.section_title ||
+    report?.context?.test_type ||
+    report?.context?.category ||
+    report?.interview_type ||
+    "Interview"
+  );
+}
+
+function getRetryTarget(report, retryState) {
+  const category = getReportCategory(report);
+  const interviewType = safeText(report?.interview_type).toLowerCase();
+
+  if (category === "aptitude" || interviewType === "aptitude") {
+    return { path: "/aptitude-test", state: null };
+  }
+  if (category === "resume" || interviewType.includes("resume")) {
+    return { path: "/resume-interview", state: null };
+  }
+  if (category === "hr") {
+    return { path: "/instructions", state: retryState };
+  }
+  if (category === "technical" || category === "mock" || category === "general") {
+    return { path: "/instructions", state: retryState };
+  }
+  return { path: "/dashboard", state: null };
+}
+
 function buildRetryState(report) {
   if (!report) return null;
 
@@ -226,6 +294,42 @@ function buildRetryState(report) {
   };
 }
 
+function buildQuestionCards(report, evaluations) {
+  if (evaluations.length) {
+    return evaluations.map((item, itemIndex) => ({
+      ...item,
+      cardId: `${item.question || item.question_id || "question"}-${itemIndex}`,
+      score: safeScore(item.score),
+      suggestedAnswer: safeText(item.suggested_answer),
+      referenceAnswer: safeCodeText(item.reference_answer),
+      hasEvaluation: true,
+    }));
+  }
+
+  return (report?.question_outline || []).map((item, itemIndex) => ({
+    question_id: safeText(item.id || itemIndex + 1),
+    question: safeText(item.question) || `Question ${itemIndex + 1}`,
+    question_type: safeText(item.question_type),
+    answer: "",
+    feedback: "No evaluated answer was captured for this question.",
+    reference_answer: "",
+    strengths: [],
+    gaps: [],
+    matched_points: [],
+    missed_points: [],
+    suggestions: [],
+    score: safeScore(item.score),
+    suggestedAnswer: "",
+    referenceAnswer: "",
+    cardId: `${item.id || item.question || "outline"}-${itemIndex}`,
+    hasEvaluation: false,
+  }));
+}
+
+function isCodingQuestion(item) {
+  return safeText(item?.question_type).toLowerCase() === "coding";
+}
+
 function Reports() {
   useScrollToTop();
   const navigate = useNavigate();
@@ -237,16 +341,17 @@ function Reports() {
   const [report, setReport] = useState(locationReport);
   const [loading, setLoading] = useState(!locationReport);
   const [error, setError] = useState("");
-  const [providerStatus, setProviderStatus] = useState(null);
   const [userRating, setUserRating] = useState(0);
   const [ratingSubmitting, setRatingSubmitting] = useState(false);
   const [ratingMessage, setRatingMessage] = useState("");
 
   useEffect(() => {
-    if (locationReport || !sessionId) return;
+    if (!sessionId) return;
 
     const loadReport = async () => {
-      setLoading(true);
+      if (!locationReport) {
+        setLoading(true);
+      }
       setError("");
       try {
         const token = localStorage.getItem("token");
@@ -255,14 +360,16 @@ function Reports() {
         });
         setReport(normalizeReport(response.data?.report, location.state?.context || {}));
       } catch (requestError) {
-        setError(
-          safeErrorText(
-            requestError.response?.data?.detail ||
-            requestError.response?.data ||
-            requestError.message ||
-            "Failed to load the report."
-          )
-        );
+        if (!locationReport) {
+          setError(
+            safeErrorText(
+              requestError.response?.data?.detail ||
+              requestError.response?.data ||
+              requestError.message ||
+              "Failed to load the report."
+            )
+          );
+        }
       } finally {
         setLoading(false);
       }
@@ -270,29 +377,6 @@ function Reports() {
 
     loadReport();
   }, [location.state?.context, locationReport, sessionId]);
-
-  useEffect(() => {
-    let ignore = false;
-
-    const loadProviderStatus = async () => {
-      try {
-        const response = await axios.get(`${API_BASE_URL}/ai-interview/providers/status`);
-        if (!ignore) {
-          setProviderStatus(response.data || null);
-        }
-      } catch {
-        if (!ignore) {
-          setProviderStatus(null);
-        }
-      }
-    };
-
-    loadProviderStatus();
-
-    return () => {
-      ignore = true;
-    };
-  }, []);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -327,25 +411,27 @@ function Reports() {
 
   const reportView = useMemo(() => {
     const evaluations = (report?.evaluations || []).filter((item) => item?.count_towards_score !== false);
-    const answeredCount = evaluations.length;
+    const reportedAnswered = Number(report?.questions_answered);
+    const answeredCount = Number.isFinite(reportedAnswered) && reportedAnswered >= 0 ? reportedAnswered : evaluations.length;
     const strongAnswerCount = evaluations.filter((item) => item.score >= 75).length;
     const needsWorkCount = evaluations.filter((item) => item.score < 60).length;
     const allMistakes = Array.from(new Set(evaluations.flatMap((item) => safeTextList(item.gaps))));
     const allMatchedPoints = evaluations.flatMap((item) => safeTextList(item.matched_points));
     const allMissedPoints = evaluations.flatMap((item) => safeTextList(item.missed_points));
-    const performanceRatio = allMatchedPoints.length + allMissedPoints.length
+    const hasPointCoverage = allMatchedPoints.length + allMissedPoints.length > 0;
+    const performanceRatio = hasPointCoverage
       ? Math.round((allMatchedPoints.length / (allMatchedPoints.length + allMissedPoints.length)) * 100)
-      : 0;
-    const reportTitle = safeText(
-      report?.context?.job_role || report?.context?.primary_language || report?.context?.category || "Interview"
-    );
+      : null;
+    const reportTitle = getReportTitle(report);
     const roleMode = safeText(report?.context?.selected_mode || report?.context?.category || "Interview");
     const roundLabel = formatRoundLabel(report?.context?.hr_round || roleMode || "Interview");
     const experience = safeText(report?.context?.experience || "Not specified");
     const timer = safeText(report?.context?.interview_mode_time || report?.context?.time_mode_interval || "No timer");
-    const focusAreaLabel = safeText(report?.context?.focus_areas || report?.context?.selected_options) || "core";
-    const skillSignals = deriveSkillSignals(report);
-    const isHrReport = safeText(report?.context?.category).toLowerCase() === "hr";
+    const focusAreaLabel = safeText(report?.context?.focus_areas || report?.context?.selected_options) || reportTitle;
+    const performanceDimensions = buildPerformanceDimensions(report);
+    const reportCategory = getReportCategory(report);
+    const isHrReport = reportCategory === "hr";
+    const isAptitudeReport = reportCategory === "aptitude" || safeText(report?.interview_type).toLowerCase() === "aptitude";
     const isResumeAdaptive = safeText(report?.interview_type).toLowerCase() === "resume_adaptive";
     const scoreBreakdown = report?.score_breakdown && typeof report.score_breakdown === "object"
       ? Object.entries(report.score_breakdown)
@@ -380,16 +466,9 @@ function Reports() {
     const avgDifficultyReached = isResumeAdaptive ? safeText(report?.avg_difficulty_reached) : "";
     
     const retryState = buildRetryState(report);
-    const completedLabel = new Date().toLocaleDateString("en-GB");
-
-    const questionCards = evaluations.map((item, itemIndex) => ({
-      ...item,
-      cardId: `${item.question}-${itemIndex}`,
-      score: safeScore(item.score),
-      idealAnswer:
-        safeText(item.suggested_answer) ||
-        "Use a clearer structure: explain the situation, your action, and the measurable result you created.",
-    }));
+    const retryTarget = getRetryTarget(report, retryState);
+    const completedLabel = formatReportDate(report);
+    const questionCards = buildQuestionCards(report, evaluations);
 
     return {
       allMistakes,
@@ -398,16 +477,18 @@ function Reports() {
       completedLabel,
       experience,
       focusAreaLabel,
+      hasPointCoverage,
+      isAptitudeReport,
       isHrReport,
       isResumeAdaptive,
       performanceRatio,
       questionCards,
       roundLabel,
       reportTitle,
-      retryState,
+      retryTarget,
       roleMode,
       scoreBreakdown,
-      skillSignals,
+      performanceDimensions,
       skillsBreakdown,
       strongAnswerCount,
       topSkills,
@@ -424,16 +505,18 @@ function Reports() {
     completedLabel,
     experience,
     focusAreaLabel,
+    hasPointCoverage,
+    isAptitudeReport,
     isHrReport,
     isResumeAdaptive,
+    performanceDimensions,
     performanceRatio,
     questionCards,
     roundLabel,
     reportTitle,
-    retryState,
+    retryTarget,
     roleMode,
     scoreBreakdown,
-    skillSignals,
     skillsBreakdown,
     strongAnswerCount,
     topSkills,
@@ -441,27 +524,6 @@ function Reports() {
     needsWorkCount,
     timer,
   } = reportView;
-  const providerReadiness = useMemo(() => {
-    if (!providerStatus?.providers || typeof providerStatus.providers !== "object") return [];
-
-    return Object.entries(providerStatus.providers).map(([name, details]) => {
-      const label = safeText(name).replace(/\b\w/g, (char) => char.toUpperCase());
-      const configured = Boolean(details?.configured);
-      const available = Boolean(details?.available);
-      const connectionChecked = Boolean(details?.connection_checked);
-      const model = safeText(details?.model);
-      const detail = safeText(details?.detail);
-      const status = connectionChecked
-        ? available ? "Reachable" : configured ? "Needs attention" : "Not configured"
-        : configured ? "Configured" : "Not configured";
-
-      return {
-        label,
-        description: [status, model ? `model ${model}` : "", detail].filter(Boolean).join(" • "),
-      };
-    });
-  }, [providerStatus]);
-
   const downloadReportPdf = () => {
     if (!reportRef.current) {
       setError("The report is not ready to export yet.");
@@ -542,7 +604,7 @@ function Reports() {
             <span className="report-badge">AI interview report</span>
             <h1 className="report-page-title">{reportTitle} performance report</h1>
             <p className="report-page-subtitle">
-              Analytical breakdown of this session, role-aligned coaching comments, and ideal answer guidance for the real interview.
+              Grounded breakdown of this session using the answers, scores, and feedback captured during the attempt.
             </p>
           </div>
 
@@ -564,22 +626,22 @@ function Reports() {
                   <span className="report-chip">{roleMode}</span>
                   <span className="report-chip">{reportTitle}</span>
                   {isHrReport ? <span className="report-chip">{roundLabel}</span> : null}
-                  <span className="report-chip">{experience} difficulty</span>
+                  <span className="report-chip">{experience}</span>
                   <span className="report-chip">{timer}</span>
                 </div>
 
                 <div className="report-hero-grid">
-                  <RadarChart items={skillSignals} />
+                  <RadarChart items={performanceDimensions} />
 
                   <div className="report-side-panel-card">
                     <div className="report-side-panel-card__header">
-                      <h2>Skill importance</h2>
+                      <h2>Evaluated dimensions</h2>
                     </div>
                     <div className="report-skill-list">
-                      {skillSignals.map((item) => (
+                      {performanceDimensions.map((item) => (
                         <div key={item.label} className="report-skill-row">
                           <span>{item.label}</span>
-                          <strong>{"*".repeat(item.importance)}</strong>
+                          <strong>{item.score}/100</strong>
                         </div>
                       ))}
                     </div>
@@ -635,9 +697,9 @@ function Reports() {
 
                 <div className="report-metrics-grid">
                   <MetricTile label="Questions answered" value={answeredCount} tone="teal" />
-                  <MetricTile label="Strong answers" value={strongAnswerCount} tone="green" />
-                  <MetricTile label="Need work" value={needsWorkCount} tone="orange" />
-                  <MetricTile label="Coverage ratio" value={`${performanceRatio}%`} tone="blue" />
+                  <MetricTile label={isAptitudeReport ? "Correct answers" : "Strong answers"} value={strongAnswerCount} tone="green" />
+                  <MetricTile label={isAptitudeReport ? "Incorrect / skipped" : "Need work"} value={needsWorkCount} tone="orange" />
+                  <MetricTile label="Covered points" value={hasPointCoverage ? `${performanceRatio}%` : "Not recorded"} tone="blue" />
                 </div>
 
                 {isResumeAdaptive && skillsBreakdown.length ? (
@@ -692,7 +754,7 @@ function Reports() {
                                     };
                                     return (
                                       <span key={idx} className={`difficulty-badge ${diffColor[diff] || "diff-medium"}`}>
-                                        {diff === "Easy" ? "⚫" : diff === "Medium" ? "⚫" : "⚫"}
+                                        {diff}
                                       </span>
                                     );
                                   })}
@@ -704,7 +766,7 @@ function Reports() {
                                   <span className="section-label">Strengths:</span>
                                   <ul className="skill-list is-strengths">
                                     {skill.strengths.map((str, idx) => (
-                                      <li key={idx}>✓ {str}</li>
+                                      <li key={idx}>{str}</li>
                                     ))}
                                   </ul>
                                 </div>
@@ -715,7 +777,7 @@ function Reports() {
                                   <span className="section-label">Areas to improve:</span>
                                   <ul className="skill-list is-weaknesses">
                                     {skill.weaknesses.map((weak, idx) => (
-                                      <li key={idx}>⚠ {weak}</li>
+                                      <li key={idx}>{weak}</li>
                                     ))}
                                   </ul>
                                 </div>
@@ -822,12 +884,27 @@ function Reports() {
                 <div className="report-card-header">
                   <div>
                     <span className="report-card-eyebrow">Question review</span>
-                    <h2>Ideal answers for the real interview</h2>
+                    <h2>Question-by-question analysis</h2>
                   </div>
                   <Brain size={18} />
                 </div>
 
                 <div className="report-question-list">
+                  {!questionCards.length ? (
+                    <article className="report-question-card">
+                      <div className="report-question-card__top">
+                        <div>
+                          <span className="report-question-card__index">No question details</span>
+                          <h3>No evaluated questions were saved for this report.</h3>
+                        </div>
+                      </div>
+                      <div className="report-question-block">
+                        <span>Report status</span>
+                        <p>The summary above is limited because this attempt did not include question-level evaluation data.</p>
+                      </div>
+                    </article>
+                  ) : null}
+
                   {questionCards.map((item, index) => (
                     <article key={item.cardId} className="report-question-card">
                       <div className="report-question-card__top">
@@ -843,7 +920,11 @@ function Reports() {
                       <div className="report-question-grid">
                         <div className="report-question-block">
                           <span>Your answer</span>
-                          <p>{safeText(item.answer) || "No answer was captured for this question."}</p>
+                          {isCodingQuestion(item) ? (
+                            <pre className="aptitude-code-summary-text">{safeCodeText(item.answer) || "No code was captured for this question."}</pre>
+                          ) : (
+                            <p>{safeText(item.answer) || "No answer was captured for this question."}</p>
+                          )}
                         </div>
 
                         <div className="report-question-block">
@@ -858,7 +939,7 @@ function Reports() {
                           <div className="report-bullet-list">
                             {(item.strengths || []).length
                               ? (item.strengths || []).map((entry) => <div key={entry}>- {entry}</div>)
-                              : <div>- The answer needs stronger positive signals in future attempts.</div>}
+                              : <div>- {item.hasEvaluation ? "No specific strength was recorded for this answer." : "No evaluated answer was captured for this question."}</div>}
                           </div>
                         </div>
 
@@ -867,7 +948,7 @@ function Reports() {
                           <div className="report-bullet-list">
                             {(item.gaps || []).length
                               ? (item.gaps || []).map((entry) => <div key={entry}>- {entry}</div>)
-                              : <div>- No clear gap tags were returned for this question.</div>}
+                              : <div>- {item.hasEvaluation ? "No clear gap tags were returned for this question." : "No gap analysis is available without an evaluated answer."}</div>}
                           </div>
                         </div>
                       </div>
@@ -875,9 +956,23 @@ function Reports() {
                       <div className="report-ideal-answer-card">
                         <div className="report-ideal-answer-card__header">
                           <Target size={16} />
-                          <span>Best answer to give in a real interview</span>
+                          <span>{isCodingQuestion(item) ? "Correct answer" : "Suggested answer guidance"}</span>
                         </div>
-                        <p>{item.idealAnswer}</p>
+                        {isCodingQuestion(item) ? (
+                          <pre className="aptitude-code-summary-text">
+                            {safeCodeText(item.referenceAnswer) ||
+                              (item.hasEvaluation
+                                ? "No reference answer was saved for this coding question."
+                                : "A correct answer can be shown after a coding submission is evaluated.")}
+                          </pre>
+                        ) : (
+                          <p>
+                            {item.suggestedAnswer ||
+                              (item.hasEvaluation
+                                ? "No suggested answer was returned for this question."
+                                : "Suggested guidance is available after an answer is evaluated.")}
+                          </p>
+                        )}
                       </div>
 
                       <div className="report-question-grid">
@@ -914,7 +1009,7 @@ function Reports() {
                         </div>
 
                         <div className="report-mini-panel">
-                          <span>Suggestions</span>
+                          <span>{isCodingQuestion(item) ? "Suggestions" : "Suggestions"}</span>
                           <div className="report-bullet-list">
                             {(item.suggestions || []).length
                               ? (item.suggestions || []).map((entry) => <div key={entry}>- {entry}</div>)
@@ -955,8 +1050,8 @@ function Reports() {
                   <button
                     className="report-primary-button"
                     onClick={() => {
-                      if (retryState) {
-                        navigate("/instructions", { state: retryState });
+                      if (retryTarget?.path) {
+                        navigate(retryTarget.path, retryTarget.state ? { state: retryTarget.state } : undefined);
                       }
                     }}
                   >
@@ -1005,20 +1100,16 @@ function Reports() {
               <article className="report-sidebar-card">
                 <div className="report-card-header report-card-header-tight">
                   <div>
-                    <span className="report-card-eyebrow">Providers</span>
-                    <h3>AI systems used</h3>
+                    <span className="report-card-eyebrow">Report basis</span>
+                    <h3>Session data used</h3>
                   </div>
                 </div>
                 <div className="report-bullet-list">
-                  <div>- Generation: {formatProviderName(report.providers?.generation_provider, "generation") || "Pending"}</div>
-                  <div>- Evaluation: {formatProviderName(report.providers?.evaluation_provider, "evaluation") || "Pending"}</div>
-                  <div>- Summary: {formatProviderName(report.providers?.summary_provider, "summary") || "Pending"}</div>
-                  {providerReadiness.map((item) => <div key={item.label}>- {item.label}: {item.description}</div>)}
                   <div>- Mode: {safeText(report.context?.selected_mode) || "Interview"}</div>
                   <div>- Timer: {timer}</div>
                   <div>- Practice type: {safeText(report.context?.practice_type) || "practice"}</div>
                   <div>- Status: {report.ended_early ? "Ended early" : "Completed"}</div>
-                  <div>- Duration tag: <Clock3 size={13} style={{ verticalAlign: "text-bottom" }} /> {timer}</div>
+                  <div>- Evaluated answers: {answeredCount}</div>
                 </div>
               </article>
             </aside>

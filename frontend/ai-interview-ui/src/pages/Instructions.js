@@ -59,11 +59,31 @@ function Instructions() {
       setTimeout(() => setAlertMessage(""), 3000);
       return;
     }
-    navigate("/interview", { state: location.state || {} });
+    if (location.state?.permissionChecked) {
+      navigate("/interview", { state: location.state || {} });
+      return;
+    }
+    navigate("/permissions", {
+      state: {
+        ...(location.state || {}),
+        fromInstructions: true,
+      },
+    });
   };
 
   const handleBack = () => {
-    navigate("/permissions", { state: location.state || {} });
+    if (location.state?.returnTo) {
+      navigate(location.state.returnTo, {
+        state: location.state.returnState || {},
+        replace: true,
+      });
+      return;
+    }
+    if (window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+    navigate("/", { replace: true });
   };
 
   const instructions = [
