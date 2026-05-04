@@ -2382,6 +2382,36 @@ def _reconcile_evaluation_with_heuristic(
         reconciled["strengths"] = _safe_list(heuristic_defaults.get("strengths"))[:3]
     if current_score < 45 and heuristic_score >= 55:
         reconciled["score"] = min(100, max(current_score, int(round((current_score + heuristic_score) / 2))))
+    if heuristic_score <= 25:
+        cap = max(12, heuristic_score + 12)
+        reconciled["score"] = min(current_score, cap)
+        reconciled["relevance"] = heuristic_relevance or "Not Relevant"
+        reconciled["correctness"] = heuristic_correctness or "Incorrect"
+        reconciled["clarity"] = _normalize_text(heuristic_defaults.get("clarity") or "Needs Improvement")
+        reconciled["logical_validity"] = _normalize_text(heuristic_defaults.get("logical_validity") or "Illogical")
+        reconciled["feedback"] = _normalize_text(heuristic_defaults.get("feedback") or reconciled.get("feedback") or "")
+        reconciled["gaps"] = _safe_list(heuristic_defaults.get("gaps"))[:3] or _safe_list(reconciled.get("gaps"))[:3]
+        reconciled["suggestions"] = _safe_list(heuristic_defaults.get("suggestions"))[:3] or _safe_list(reconciled.get("suggestions"))[:3]
+        reconciled["matched_points"] = _safe_list(heuristic_defaults.get("matched_points"))[:4]
+        reconciled["missed_points"] = _safe_list(heuristic_defaults.get("missed_points"))[:4] or _safe_list(reconciled.get("missed_points"))[:4]
+        for metric_key in [
+            "communication_score",
+            "confidence_score",
+            "problem_solving_score",
+            "teamwork_score",
+            "leadership_score",
+            "hr_readiness_score",
+            "personality_attitude_score",
+            "cultural_fit_score",
+            "star_score",
+        ]:
+            heuristic_metric = _normalize_score_value(heuristic_defaults.get(metric_key))
+            current_metric = _normalize_score_value(reconciled.get(metric_key))
+            if heuristic_metric is not None or current_metric is not None:
+                reconciled[metric_key] = min(
+                    current_metric if current_metric is not None else 100,
+                    max(0, (heuristic_metric if heuristic_metric is not None else heuristic_score) + 8),
+                )
 
     return reconciled
 
@@ -6788,7 +6818,11 @@ def _build_skill_wise_breakdown(session: Dict[str, Any]) -> Dict[str, Any]:
             "difficulty_progression": difficulty_progression,
             "questions_count": len(skill_evaluations),
             "performance": performance,
-            "strengths": strengths if strengths else [f"Basic understanding of {skill}"],
+            "strengths": strengths if strengths else (
+                [f"Some partial understanding of {skill} was visible."]
+                if skill_score >= 50
+                else [f"No reliable strength in {skill} was demonstrated yet."]
+            ),
             "weaknesses": weaknesses if weaknesses else [f"Further practice with {skill} needed"],
             "recommendation": _generate_skill_recommendation(skill, skill_score, proficiency),
         }
@@ -6827,7 +6861,30 @@ def _generate_skill_recommendation(skill: str, score: int, proficiency: str) -> 
     return recommendations.get(proficiency, f"Continue improving your {skill} skills.")
 
 
-def _fallback_summary(session: Dict[str, Any]) -> Dict[str, Any]:
+def _unique_report_items(values: List[str], limit: int = 3) -> List[str]:
+    cleaned: List[str] = []
+    seen = set()
+    generic_strengths = {
+        "you provided a direct spoken response to the question",
+        "completed the interview flow with spoken responses",
+        "you completed the full hr interview flow with spoken responses",
+        "completed adaptive interview with progressive difficulty",
+    }
+    for value in values:
+        item = _normalize_text(value)
+        if not item:
+            continue
+        key = item.rstrip(".").lower()
+        if key in seen or key in generic_strengths:
+            continue
+        seen.add(key)
+        cleaned.append(item.rstrip(".") + ".")
+        if len(cleaned) >= limit:
+            break
+    return cleaned
+
+
+def _fallback_summary(session: Dict[str, Any], ended_early: bool = False) -> Dict[str, Any]:
     evaluations = _scored_evaluations(session)
     if evaluations:
         average_score = int(round(sum(item["score"] for item in evaluations) / len(evaluations)))
@@ -6844,25 +6901,79 @@ def _fallback_summary(session: Dict[str, Any]) -> Dict[str, Any]:
         for item in evaluations
         if item["score"] < 60
     ][:3]
+    answered = len(evaluations)
+    total = _session_total_questions(session)
+    completion_note = (
+        f"This report is based on {answered} evaluated answer{'s' if answered != 1 else ''}"
+        f" out of {total} planned question{'s' if total != 1 else ''}."
+        if total
+        else f"This report is based on {answered} evaluated answer{'s' if answered != 1 else ''}."
+    )
+    if ended_early:
+        completion_note += " The interview ended early, so the report reflects only the answers captured before ending."
+
+    strengths_from_answers: List[str] = []
+    for item in evaluations:
+        if int(item.get("score", 0) or 0) >= 60:
+            strengths_from_answers.extend(_safe_list(item.get("strengths")))
+            strengths_from_answers.extend([f"Covered: {point}" for point in _safe_list(item.get("matched_points"))[:2]])
+
+    improvements_from_answers: List[str] = []
+    for item in evaluations:
+        improvements_from_answers.extend(_safe_list(item.get("gaps")))
+        improvements_from_answers.extend(_safe_list(item.get("suggestions")))
+        improvements_from_answers.extend([f"Review: {point}" for point in _safe_list(item.get("missed_points"))[:2]])
+
+    top_strengths = _unique_report_items(strengths_from_answers, 3)
+    if not top_strengths:
+        if evaluations and average_score < 40:
+            top_strengths = ["No reliable interview strength was demonstrated yet from the evaluated answers."]
+        elif evaluations:
+            top_strengths = ["Some answers showed partial direction, but they need clearer evidence before calling them a strength."]
+        else:
+            top_strengths = ["No evaluated answers were captured, so strengths cannot be measured yet."]
+
+    improvement_areas = _unique_report_items(improvements_from_answers, 3)
+    if not improvement_areas:
+        improvement_areas = [
+            "Answer the exact question in clear sentences.",
+            "Add one concrete example, step, result, or technical detail.",
+            "Avoid filler, random text, or incomplete responses.",
+        ]
+
+    if not evaluations:
+        summary_text = (
+            f"{completion_note} No scored answers were available, so the system cannot make a reliable performance claim. "
+            "Complete at least a few questions with clear answers to receive accurate strengths, gaps, and scoring."
+        )
+    elif average_score < 40:
+        summary_text = (
+            f"{completion_note} The captured answers were mostly unclear, irrelevant, incomplete, or not meaningful enough for a strong interview evaluation. "
+            "The priority is to answer directly in complete sentences, then add one concrete example or technical detail."
+        )
+    elif average_score < 60:
+        summary_text = (
+            f"{completion_note} The session shows weak to partial performance. "
+            "Some intent may be visible, but the answers need stronger relevance, structure, and specific evidence."
+        )
+    elif average_score < 75:
+        summary_text = (
+            f"{completion_note} The session shows a moderate base. "
+            "To improve, make each answer more structured, role-specific, and supported by examples or trade-offs."
+        )
+    else:
+        summary_text = (
+            f"{completion_note} The session shows strong performance across the evaluated answers. "
+            "Keep adding precise examples, measurable outcomes, and deeper reasoning to make the report even stronger."
+        )
 
     if _normalize_text(session.get("context", {}).get("category") or "").lower() == "hr":
         score_breakdown = _build_hr_score_breakdown(session)
         return {
             "overall_score": average_score,
-            "summary": (
-                "You completed the HR interview. Keep strengthening structure, specific examples, and measurable outcomes "
-                "so your communication sounds more interview-ready."
-            ),
-            "top_strengths": [
-                "You completed the full HR interview flow with spoken responses.",
-                "You gave relevant examples tied to your experience and role direction.",
-                "You showed willingness to explain decisions, teamwork, and outcomes.",
-            ],
-            "improvement_areas": [
-                "Use clearer STAR structure in behavioral answers.",
-                "Add stronger outcomes, numbers, or lessons learned.",
-                "Keep answers specific instead of generic or overly broad.",
-            ],
+            "summary": summary_text,
+            "top_strengths": top_strengths,
+            "improvement_areas": improvement_areas,
             "strongest_questions": strong_answers,
             "needs_work_questions": weak_answers,
             "score_breakdown": score_breakdown,
@@ -6870,20 +6981,9 @@ def _fallback_summary(session: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         "overall_score": average_score,
-        "summary": (
-            "You completed the interview. Focus on clearer structure, stronger examples, "
-            "and tighter role alignment to improve further."
-        ),
-        "top_strengths": [
-            "Completed the interview flow with spoken responses.",
-            "Covered several expected points across the session.",
-            "Showed willingness to explain experience verbally.",
-        ],
-        "improvement_areas": [
-            "Make answers more specific and evidence-based.",
-            "Use a clearer situation-action-result structure.",
-            "Tie each answer back to the target role or language.",
-        ],
+        "summary": summary_text,
+        "top_strengths": top_strengths,
+        "improvement_areas": improvement_areas,
         "strongest_questions": strong_answers,
         "needs_work_questions": weak_answers,
     }
@@ -6975,13 +7075,14 @@ Return valid JSON:
             provider = "fallback"
         
         # Build skill-wise report
+        grounded_summary = _fallback_summary(session, ended_early=ended_early)
         summary = {
             "overall_score": skill_wise_data["overall_score"],
-            "summary": _normalize_text(summary_ai.get("summary", "")),
-            "top_strengths": _safe_list(summary_ai.get("top_strengths")) or ["Completed adaptive interview with progressive difficulty"],
-            "improvement_areas": _safe_list(summary_ai.get("improvement_areas")) or ["Continue developing technical depth"],
-            "strongest_questions": _safe_list(summary_ai.get("strongest_questions")) or [],
-            "needs_work_questions": _safe_list(summary_ai.get("needs_work_questions")) or [],
+            "summary": grounded_summary["summary"],
+            "top_strengths": grounded_summary["top_strengths"],
+            "improvement_areas": grounded_summary["improvement_areas"],
+            "strongest_questions": grounded_summary["strongest_questions"],
+            "needs_work_questions": grounded_summary["needs_work_questions"],
             "interview_type": "resume_adaptive",
             "skills_breakdown": skill_wise_data["skills_breakdown"],
             "top_skills": skill_wise_data["top_skills"],
@@ -7026,18 +7127,18 @@ Return valid JSON:
                 LIVE_AI_TIMEOUT_SECONDS,
             )
         except ProviderError:
-            summary = _fallback_summary(session)
+            summary = _fallback_summary(session, ended_early=ended_early)
             provider = "fallback"
 
         if provider != "fallback":
-            fallback = _fallback_summary(session)
+            fallback = _fallback_summary(session, ended_early=ended_early)
             summary = {
-                "overall_score": int(summary.get("overall_score", fallback["overall_score"])),
-                "summary": _normalize_text(summary.get("summary") or fallback["summary"]),
-                "top_strengths": _safe_list(summary.get("top_strengths")) or fallback["top_strengths"],
-                "improvement_areas": _safe_list(summary.get("improvement_areas")) or fallback["improvement_areas"],
-                "strongest_questions": _safe_list(summary.get("strongest_questions")) or fallback["strongest_questions"],
-                "needs_work_questions": _safe_list(summary.get("needs_work_questions")) or fallback["needs_work_questions"],
+                "overall_score": fallback["overall_score"],
+                "summary": fallback["summary"],
+                "top_strengths": fallback["top_strengths"],
+                "improvement_areas": fallback["improvement_areas"],
+                "strongest_questions": fallback["strongest_questions"],
+                "needs_work_questions": fallback["needs_work_questions"],
             }
             if is_hr_session:
                 summary["score_breakdown"] = fallback.get("score_breakdown") or _build_hr_score_breakdown(session)

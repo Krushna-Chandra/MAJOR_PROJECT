@@ -8014,6 +8014,18 @@ button {
 
 
 
+.report-question-block,
+
+.report-ideal-answer-card {
+
+  display: flex;
+
+  flex-direction: column;
+
+}
+
+
+
 .report-question-block span,
 
 .report-mini-panel span {
@@ -29034,9 +29046,29 @@ button {
 
 .aptitude-code-summary-text {
 
+  margin: 0;
+
+  padding: 16px 18px;
+
+  min-height: 220px;
+
   white-space: pre-wrap;
 
+  overflow-x: auto;
+
   font-family: Consolas, "Courier New", monospace;
+
+  font-size: 0.98rem;
+
+  line-height: 1.55;
+
+  color: #0f172a;
+
+  background: rgba(248, 250, 252, 0.92);
+
+  border: 1px solid #dbe4f0;
+
+  border-radius: 16px;
 
 }
 

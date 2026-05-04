@@ -1,9 +1,8 @@
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, ArrowRight, BriefcaseBusiness, ShieldCheck, Sparkles } from "lucide-react";
 import axios from "axios";
 import "../App.css";
-import { useScrollToTop } from "../hooks/useScrollToTop";
 import interviewrLogo from "../assets/Website Logo.png";
 import interviewrWordmark from "../assets/Main Logo 2.png";
 
@@ -25,20 +24,85 @@ function Auth() {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [googleClientId, setGoogleClientId] = useState(process.env.REACT_APP_GOOGLE_CLIENT_ID || "");
+
+  const clearFields = useCallback(() => {
+    setFirstName("");
+    setLastName("");
+    setEmail("");
+    setPassword("");
+    setConfirmPassword("");
+  }, []);
+
+  const handleGoogleSuccess = useCallback(async (response) => {
+    setError(null);
+    setLoading(true);
+    const loadingStartedAt = Date.now();
+    try {
+      const res = await api.post("/auth/google-login", {
+        token: response.credential
+      });
+      const remainingDelay = Math.max(0, 700 - (Date.now() - loadingStartedAt));
+      if (remainingDelay > 0) {
+        await delay(remainingDelay);
+      }
+      localStorage.setItem("token", res.data.access_token);
+      localStorage.setItem("user", JSON.stringify(res.data.user));
+      window.dispatchEvent(new Event("authchange"));
+      clearFields();
+      navigate("/");
+    } catch (err) {
+      const msg = typeof err.response?.data?.detail === "string"
+        ? err.response.data.detail
+        : err.response?.data?.detail?.[0]?.msg || "Google sign-in failed";
+      setError(msg);
+      setLoading(false);
+    }
+  }, [clearFields, navigate]);
+
+  useEffect(() => {
+    if (googleClientId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    api.get("/auth/google-client-id")
+      .then((res) => {
+        if (!cancelled && res.data?.client_id) {
+          setGoogleClientId(res.data.client_id);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setError("Google sign-in is not configured on this system.");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [googleClientId]);
 
   // Initialize Google Sign-In
-  React.useEffect(() => {
-    if (isLogin && window.google) {
+  useEffect(() => {
+    const buttonContainer = document.getElementById("google-signin-button");
+
+    if (buttonContainer) {
+      buttonContainer.innerHTML = "";
+    }
+
+    if (isLogin && window.google && googleClientId && buttonContainer) {
       window.google.accounts.id.initialize({
-        client_id: process.env.REACT_APP_GOOGLE_CLIENT_ID,
+        client_id: googleClientId,
         callback: handleGoogleSuccess
       });
       window.google.accounts.id.renderButton(
-        document.getElementById('google-signin-button'),
+        buttonContainer,
         { theme: 'outline', size: 'large', width: '100%' }
       );
     }
-  }, [isLogin]);
+  }, [googleClientId, handleGoogleSuccess, isLogin]);
 
   const authHighlights = [
     {
@@ -57,14 +121,6 @@ function Auth() {
       description: "Get clear suggestions after every session to improve faster.",
     },
   ];
-
-  const clearFields = () => {
-    setFirstName("");
-    setLastName("");
-    setEmail("");
-    setPassword("");
-    setConfirmPassword("");
-  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -112,37 +168,6 @@ function Auth() {
       setError(msg);
       setLoading(false);
     }
-  };
-
-  const handleGoogleSuccess = async (response) => {
-    setError(null);
-    setLoading(true);
-    const loadingStartedAt = Date.now();
-    try {
-      const res = await api.post("/auth/google-login", {
-        token: response.credential
-      });
-      const remainingDelay = Math.max(0, 700 - (Date.now() - loadingStartedAt));
-      if (remainingDelay > 0) {
-        await delay(remainingDelay);
-      }
-      localStorage.setItem("token", res.data.access_token);
-      localStorage.setItem("user", JSON.stringify(res.data.user));
-      window.dispatchEvent(new Event("authchange"));
-      clearFields();
-      navigate("/");
-    } catch (err) {
-      const msg = typeof err.response?.data?.detail === "string"
-        ? err.response.data.detail
-        : err.response?.data?.detail?.[0]?.msg || "Google sign-in failed";
-      setError(msg);
-      setLoading(false);
-    }
-  };
-
-  const handleGoogleError = () => {
-    setError("Google sign-in failed. Please try again.");
-    setLoading(false);
   };
 
   return (

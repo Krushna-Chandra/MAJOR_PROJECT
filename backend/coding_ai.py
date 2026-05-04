@@ -565,6 +565,107 @@ def _language_status(language_id: str) -> Dict[str, Any]:
     }
 
 
+def _fallback_reference_solution(challenge: Dict[str, Any]) -> Dict[str, str]:
+    title = _normalize_text(challenge.get("title") or "").lower()
+
+    def python_program(body: str) -> str:
+        return f"""import sys
+
+
+def solve(raw_input: str) -> str:
+{body}
+
+
+if __name__ == "__main__":
+    print(str(solve(sys.stdin.read().strip())).strip())
+"""
+
+    solutions = {
+        "count words with vowels": python_program(
+            """    words = raw_input.split()
+    count = sum(1 for word in words if any(ch in "aeiou" for ch in word.lower()))
+    return str(count)"""
+        ),
+        "count vowels in a string": python_program(
+            """    text = raw_input.lower()
+    count = sum(1 for ch in text if ch in "aeiou")
+    return str(count)"""
+        ),
+        "sum of digits": python_program(
+            """    total = sum(int(ch) for ch in raw_input if ch.isdigit())
+    return str(total)"""
+        ),
+        "count even numbers in a list": python_program(
+            """    nums = [int(x) for x in raw_input.split()] if raw_input else []
+    count = sum(1 for x in nums if x % 2 == 0)
+    return str(count)"""
+        ),
+        "largest digit in a number": python_program(
+            """    digits = [ch for ch in raw_input if ch.isdigit()]
+    return max(digits) if digits else "0" """
+        ),
+        "count positive numbers": python_program(
+            """    nums = [int(x) for x in raw_input.split()] if raw_input else []
+    count = sum(1 for x in nums if x > 0)
+    return str(count)"""
+        ),
+        "reverse each word": python_program(
+            """    reversed_words = [word[::-1] for word in raw_input.split()]
+    return " ".join(reversed_words)"""
+        ),
+        "second largest number": python_program(
+            """    nums = sorted(int(x) for x in raw_input.split()) if raw_input else []
+    return str(nums[-2])"""
+        ),
+    }
+    return {
+        "language": "python",
+        "code": solutions.get(title, ""),
+    }
+
+
+def _format_reference_code(language: str, code: str) -> str:
+    normalized = str(code or "").replace("\r\n", "\n").strip()
+    if not normalized:
+        return ""
+    if "\n" in normalized:
+        return normalized
+
+    formatted = normalized
+
+    if language == "python":
+        replacements = [
+            (" def ", "\ndef "),
+            (" if __name__ == ", "\n\nif __name__ == "),
+            (" for ", "\n    for "),
+            (" while ", "\n    while "),
+            (" if ", "\n    if "),
+            (" elif ", "\n    elif "),
+            (" else:", "\n    else:"),
+            (" print(", "\nprint("),
+            (" return ", "\n    return "),
+        ]
+        for source, target in replacements:
+            formatted = formatted.replace(source, target)
+
+        lines = []
+        for line in formatted.split("\n"):
+            stripped = line.strip()
+            if not stripped:
+                if lines and lines[-1] != "":
+                    lines.append("")
+                continue
+            if stripped.startswith(("import ", "from ", "def ", "if __name__")):
+                lines.append(stripped)
+            elif stripped.startswith(("for ", "while ", "if ", "elif ", "else:", "return ")):
+                lines.append(f"    {stripped}")
+            else:
+                lines.append(stripped)
+        return "\n".join(lines).strip()
+
+    return formatted
+
+
 def _starter_code_for_challenge(challenge: Dict[str, Any]) -> Dict[str, str]:
     title = _normalize_text(challenge.get("title") or "Coding Challenge")
     return {
@@ -1037,6 +1138,54 @@ Return valid JSON:
         }
     except ProviderError:
         return fallback
+
+
+async def generate_reference_solution(challenge: Dict[str, Any], language: str) -> Dict[str, str]:
+    fallback = _fallback_reference_solution(challenge)
+    if fallback.get("code") and fallback.get("language") == language:
+        return fallback
+
+    prompt = f"""
+You are writing a correct reference solution for a coding interview problem.
+
+Challenge title: {_normalize_text(challenge.get("title") or "")}
+Difficulty: {_normalize_text(challenge.get("difficulty") or "")}
+Problem: {_normalize_text(challenge.get("description") or "")}
+Constraints: {json.dumps(challenge.get("constraints") or [])}
+Hints: {json.dumps(challenge.get("hints") or [])}
+Examples: {json.dumps(challenge.get("examples") or [], ensure_ascii=False)}
+Public test cases: {json.dumps(challenge.get("public_test_cases") or [], ensure_ascii=False)}
+Required language: {language}
+
+Return valid JSON:
+{{
+  "solution_code": "full runnable program that reads stdin and prints stdout only"
+}}
+
+Rules:
+- Return only the code string inside JSON.
+- The solution must be correct for the stated problem.
+- Do not include markdown fences.
+"""
+    try:
+        generated, _provider = await _generate_json_with_fallback(
+            prompt,
+            ["gemini", "ollama"],
+            0.2,
+            20,
+        )
+        code = str(generated.get("solution_code") or "").strip()
+        if code:
+            return {
+                "language": language,
+                "code": _format_reference_code(language, code),
+            }
+    except ProviderError:
+        pass
+    return {
+        "language": fallback.get("language") or language,
+        "code": _format_reference_code(fallback.get("language") or language, fallback.get("code") or ""),
+    }
 
 
 def build_fallback_coding_review(execution_summary: Dict[str, Any]) -> Dict[str, Any]:

@@ -6,6 +6,7 @@ import "../App.css";
 import MiniNavbar from "../components/MiniNavbar";
 import aptitudeHero from "../assets/aptitude.png";
 import logo from "../assets/Website Logo.png";
+import { safeCodeText } from "../utils/interviewReport";
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || "http://127.0.0.1:8000";
 const CODING_HISTORY_KEY = "apis-coding-question-history";
@@ -263,6 +264,8 @@ function createCodingSessionSummary(sectionId, challenges, answers, language, ru
       sourceCode: answers[index] || "",
       execution,
       review: submitResults[index]?.review || null,
+      referenceSolution: submitResults[index]?.reference_solution?.code || "",
+      referenceSolutionLanguage: submitResults[index]?.reference_solution?.language || "",
       language,
     };
   });
@@ -838,6 +841,71 @@ function getAptitudeQuestionOutline(summary) {
   }));
 }
 
+function buildCodingReferenceAnswer(challenge) {
+  const title = String(challenge?.title || "").trim().toLowerCase();
+  const pythonProgram = (body) => `import sys
+
+
+def solve(raw_input: str) -> str:
+${body}
+
+
+if __name__ == "__main__":
+    print(str(solve(sys.stdin.read().strip())).strip())`;
+
+  const knownSolutions = {
+    "count words with vowels": pythonProgram(`    words = raw_input.split()
+    count = sum(1 for word in words if any(ch in "aeiou" for ch in word.lower()))
+    return str(count)`),
+    "count vowels in a string": pythonProgram(`    text = raw_input.lower()
+    count = sum(1 for ch in text if ch in "aeiou")
+    return str(count)`),
+    "sum of digits": pythonProgram(`    total = sum(int(ch) for ch in raw_input if ch.isdigit())
+    return str(total)`),
+    "count even numbers in a list": pythonProgram(`    nums = [int(x) for x in raw_input.split()] if raw_input else []
+    count = sum(1 for x in nums if x % 2 == 0)
+    return str(count)`),
+    "count even numbers": pythonProgram(`    nums = [int(x) for x in raw_input.split()] if raw_input else []
+    count = sum(1 for x in nums if x % 2 == 0)
+    return str(count)`),
+    "largest digit in a number": pythonProgram(`    digits = [ch for ch in raw_input if ch.isdigit()]
+    return max(digits) if digits else "0"`),
+    "count positive numbers": pythonProgram(`    nums = [int(x) for x in raw_input.split()] if raw_input else []
+    count = sum(1 for x in nums if x > 0)
+    return str(count)`),
+    "reverse each word": pythonProgram(`    reversed_words = [word[::-1] for word in raw_input.split()]
+    return " ".join(reversed_words)`),
+    "second largest number": pythonProgram(`    nums = sorted(int(x) for x in raw_input.split()) if raw_input else []
+    return str(nums[-2])`),
+  };
+
+  if (knownSolutions[title]) {
+    return knownSolutions[title];
+  }
+
+  const examples = Array.isArray(challenge?.examples) ? challenge.examples : [];
+  const exampleText = examples
+    .slice(0, 2)
+    .map((example, index) => {
+      const input = String(example?.input || "").trim();
+      const output = String(example?.output || example?.expected_output || "").trim();
+      const explanation = String(example?.explanation || "").trim();
+      const parts = [`Example ${index + 1}:`];
+      if (input) parts.push(`input ${input}`);
+      if (output) parts.push(`output ${output}`);
+      if (explanation) parts.push(explanation);
+      return parts.join(" | ");
+    })
+    .filter(Boolean)
+    .join(" || ");
+
+  const hint = Array.isArray(challenge?.hints) && challenge.hints.length
+    ? String(challenge.hints[0] || "").trim()
+    : "";
+
+  return [exampleText, hint ? `Approach: ${hint}` : ""].filter(Boolean).join(" || ");
+}
+
 function getAptitudeEvaluations(summary) {
   if (!summary) return [];
   if (summary.mode === "mock") {
@@ -849,6 +917,7 @@ function getAptitudeEvaluations(summary) {
       question: item.challenge?.title || item.challenge?.description || `Coding question ${index + 1}`,
       question_type: "coding",
       answer: item.sourceCode || "",
+      reference_answer: item.referenceSolution || buildCodingReferenceAnswer(item.challenge),
       feedback: item.review?.summary || "",
       strengths: item.review?.strengths || [],
       gaps: item.review?.issues || item.review?.next_steps || [],
@@ -868,6 +937,72 @@ function getAptitudeEvaluations(summary) {
   }));
 }
 
+function uniqueReportItems(values, limit = 3) {
+  const seen = new Set();
+  return values
+    .map((value) => String(value || "").replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .filter((value) => {
+      const key = value.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, limit);
+}
+
+function buildAptitudeReportInsights(summary, evaluations, scorePercent, sectionTitle) {
+  const totalQuestions = Number(summary?.totalQuestions) || evaluations.length || 0;
+  const answeredCount = Number(summary?.answeredCount) || evaluations.filter((item) => String(item.answer || "").trim()).length;
+  const correctCount = evaluations.filter((item) => item.score >= 100).length;
+  const wrongCount = evaluations.filter((item) => item.score < 100 && String(item.answer || "").trim()).length;
+  const skippedCount = Math.max(0, totalQuestions - answeredCount);
+  const strongestQuestions = evaluations.filter((item) => item.score >= 100).map((item) => item.question).slice(0, 3);
+  const needsWorkQuestions = evaluations.filter((item) => item.score < 100).map((item) => item.question).slice(0, 3);
+
+  const strengths = [];
+  if (correctCount > 0) {
+    strengths.push(`You answered ${correctCount} question${correctCount === 1 ? "" : "s"} correctly in ${sectionTitle}.`);
+  }
+  if (scorePercent >= 80) {
+    strengths.push("Accuracy was strong across the attempted questions.");
+  } else if (scorePercent >= 60) {
+    strengths.push("You showed a workable base, but consistency still needs improvement.");
+  }
+  if (answeredCount === totalQuestions && totalQuestions > 0) {
+    strengths.push("You attempted every question in this round.");
+  }
+  if (!strengths.length) {
+    strengths.push("No reliable aptitude strength was demonstrated yet from this attempt.");
+  }
+
+  const improvements = [];
+  if (wrongCount > 0) {
+    improvements.push(`Review the ${wrongCount} incorrect attempted question${wrongCount === 1 ? "" : "s"} and redo similar problems.`);
+  }
+  if (skippedCount > 0) {
+    improvements.push(`Improve time management: ${skippedCount} question${skippedCount === 1 ? " was" : "s were"} not answered.`);
+  }
+  if (scorePercent < 50) {
+    improvements.push("Rebuild the fundamentals for this section before increasing speed.");
+  } else if (scorePercent < 75) {
+    improvements.push("Practice mixed sets and review error patterns to lift accuracy above 75%.");
+  }
+  if (!improvements.length) {
+    improvements.push("Keep practicing timed sets to maintain accuracy under pressure.");
+  }
+
+  const summaryText = `${sectionTitle} report: ${correctCount}/${totalQuestions || evaluations.length} correct, ${wrongCount} incorrect, ${skippedCount} skipped, and ${scorePercent}/100 overall.`;
+
+  return {
+    summaryText,
+    topStrengths: uniqueReportItems(strengths),
+    improvementAreas: uniqueReportItems(improvements),
+    strongestQuestions,
+    needsWorkQuestions,
+  };
+}
+
 function buildAptitudeReportPayload(summary, candidateName = "") {
   const section = getSectionConfig(summary?.sectionId);
   const mockTitle = summary?.mode === "mock" ? "Aptitude Mock" : "";
@@ -878,6 +1013,7 @@ function buildAptitudeReportPayload(summary, candidateName = "") {
   const evaluations = getAptitudeEvaluations(summary);
   const answered = summary?.answeredCount || 0;
   const total = summary?.totalQuestions || 0;
+  const insights = buildAptitudeReportInsights(summary, evaluations, scorePercent, sectionTitle);
 
   return {
     category: "aptitude",
@@ -885,11 +1021,11 @@ function buildAptitudeReportPayload(summary, candidateName = "") {
     selected_mode: "aptitude",
     score: scorePercent,
     overall_score: scorePercent,
-    summary: `${sectionTitle} completed with ${summary?.score || 0}/${maxScore || total} points and ${answered}/${total} questions answered.`,
-    top_strengths: scorePercent >= 70 ? ["Strong accuracy in this aptitude round."] : [],
-    improvement_areas: scorePercent < 70 ? ["Review missed questions and repeat a focused aptitude round."] : [],
-    strongest_questions: evaluations.filter((item) => item.score >= 100).map((item) => item.question).slice(0, 3),
-    needs_work_questions: evaluations.filter((item) => item.score < 100).map((item) => item.question).slice(0, 3),
+    summary: insights.summaryText,
+    top_strengths: insights.topStrengths,
+    improvement_areas: insights.improvementAreas,
+    strongest_questions: insights.strongestQuestions,
+    needs_work_questions: insights.needsWorkQuestions,
     answers: evaluations.map((item) => item.answer),
     evaluations,
     questions_answered: answered,
@@ -2333,11 +2469,11 @@ function AptitudeTest({ examOnly = false }) {
                       <div className="aptitude-review-answer-grid">
                         <div>
                           <span>Your code</span>
-                          <p className="aptitude-code-summary-text">{item.sourceCode || "No code submitted."}</p>
+                          <pre className="aptitude-code-summary-text">{safeCodeText(item.sourceCode) || "No code submitted."}</pre>
                         </div>
                         <div>
-                          <span>Improvement suggestions</span>
-                          <p className="aptitude-code-summary-text">{(item.review?.next_steps || []).join(" | ") || "No suggestions available."}</p>
+                          <span>Correct answer</span>
+                          <pre className="aptitude-code-summary-text">{safeCodeText(item.referenceSolution || item.reference_answer || buildCodingReferenceAnswer(item.challenge)) || "No reference answer available."}</pre>
                         </div>
                       </div>
                     </article>
@@ -3512,11 +3648,11 @@ function AptitudeTest({ examOnly = false }) {
                     <div className="aptitude-review-answer-grid">
                       <div>
                         <span>Your code</span>
-                        <p className="aptitude-code-summary-text">{item.sourceCode || "No code submitted."}</p>
+                        <pre className="aptitude-code-summary-text">{safeCodeText(item.sourceCode) || "No code submitted."}</pre>
                       </div>
                       <div>
-                        <span>Improvement suggestions</span>
-                        <p className="aptitude-code-summary-text">{(item.review?.next_steps || []).join(" | ") || "No suggestions available."}</p>
+                        <span>Correct answer</span>
+                        <pre className="aptitude-code-summary-text">{safeCodeText(item.referenceSolution || item.reference_answer || buildCodingReferenceAnswer(item.challenge)) || "No reference answer available."}</pre>
                       </div>
                     </div>
                   </article>
