@@ -301,7 +301,7 @@ function buildQuestionCards(report, evaluations) {
       cardId: `${item.question || item.question_id || "question"}-${itemIndex}`,
       score: safeScore(item.score),
       suggestedAnswer: safeText(item.suggested_answer),
-      referenceAnswer: safeText(item.reference_answer),
+      referenceAnswer: safeCodeText(item.reference_answer),
       hasEvaluation: true,
     }));
   }
@@ -346,10 +346,12 @@ function Reports() {
   const [ratingMessage, setRatingMessage] = useState("");
 
   useEffect(() => {
-    if (locationReport || !sessionId) return;
+    if (!sessionId) return;
 
     const loadReport = async () => {
-      setLoading(true);
+      if (!locationReport) {
+        setLoading(true);
+      }
       setError("");
       try {
         const token = localStorage.getItem("token");
@@ -358,14 +360,16 @@ function Reports() {
         });
         setReport(normalizeReport(response.data?.report, location.state?.context || {}));
       } catch (requestError) {
-        setError(
-          safeErrorText(
-            requestError.response?.data?.detail ||
-            requestError.response?.data ||
-            requestError.message ||
-            "Failed to load the report."
-          )
-        );
+        if (!locationReport) {
+          setError(
+            safeErrorText(
+              requestError.response?.data?.detail ||
+              requestError.response?.data ||
+              requestError.message ||
+              "Failed to load the report."
+            )
+          );
+        }
       } finally {
         setLoading(false);
       }
