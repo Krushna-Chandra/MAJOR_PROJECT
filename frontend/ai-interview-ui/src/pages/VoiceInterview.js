@@ -52,6 +52,23 @@ const STARTUP_CAMERA_TIMEOUT_MS = 2500;
 
 const STARTUP_HANDOFF_STALL_MS = 6500;
 
+const CAMERA_RESTORE_RESUME_DELAY_MS = 900;
+
+const CAMERA_PAUSE_COPY = {
+  camera_off: {
+    title: "Interview paused",
+    detail: "Camera feed stopped. Turn your camera back on to continue.",
+  },
+  face_missing: {
+    title: "Interview paused",
+    detail: "Face not detected. Stay visible in the camera to continue.",
+  },
+  face_out_of_frame: {
+    title: "Interview paused",
+    detail: "Keep your face inside the camera frame to continue.",
+  },
+};
+
 
 
 const STARTUP_STAGE_MESSAGES = [
@@ -1170,6 +1187,10 @@ const getInterviewPresenceMeta = ({
 
 
 
+  cameraPaused = false,
+
+
+
   speechRecognitionAvailable = false,
 
 
@@ -1231,6 +1252,38 @@ const getInterviewPresenceMeta = ({
 
 
       detail: "The session is waiting for fullscreen to be restored before the interviewer continues.",
+
+
+
+    };
+
+
+
+  }
+
+
+
+  if (cameraPaused) {
+
+
+
+    return {
+
+
+
+      activeKey: "mic-muted",
+
+
+
+      bubble: "Paused",
+
+
+
+      headline: "Interview paused",
+
+
+
+      detail: "Camera verification is paused until your camera is live and your face is inside the frame.",
 
 
 
@@ -2521,6 +2574,10 @@ const pauseForFullscreenLossRef = useRef(() => {});
 
   const dialogOpenRef = useRef(false);
 
+  const cameraPausedRef = useRef(false);
+
+  const cameraResumeTimerRef = useRef(null);
+
 
 
   const startedRef = useRef(false);
@@ -2564,6 +2621,10 @@ const pauseForFullscreenLossRef = useRef(() => {});
 
 
   const finalizeEarlyExitRef = useRef(null);
+
+
+
+  const resumeInterviewAfterPauseRef = useRef(null);
 
 
 
@@ -2624,6 +2685,10 @@ const pauseForFullscreenLossRef = useRef(() => {});
 
 
   const [fullscreenBlocked, setFullscreenBlocked] = useState(false);
+
+  const [cameraPaused, setCameraPaused] = useState(false);
+
+  const [cameraPauseReason, setCameraPauseReason] = useState("");
 
 
 
@@ -2997,6 +3062,20 @@ const pauseForFullscreenLossRef = useRef(() => {});
 
 
   }, [dialogOpen]);
+
+
+
+
+
+  useEffect(() => {
+
+
+
+    cameraPausedRef.current = cameraPaused;
+
+
+
+  }, [cameraPaused]);
 
 
 
@@ -4259,6 +4338,10 @@ const runStartupLaunchCountdown = async (runId) => {
 
 
 
+    !cameraPausedRef.current &&
+
+
+
     !summaryRef.current &&
 
 
@@ -4670,6 +4753,10 @@ const runStartupLaunchCountdown = async (runId) => {
 
 
 
+      cameraPausedRef.current ||
+
+
+
       dialogOpenRef.current ||
 
 
@@ -4871,6 +4958,10 @@ const runStartupLaunchCountdown = async (runId) => {
 
 
         !fullscreenBlockedRef.current &&
+
+
+
+        !cameraPausedRef.current &&
 
 
 
@@ -5250,7 +5341,11 @@ const runStartupLaunchCountdown = async (runId) => {
 
 
 
-      fullscreenBlockedRef.current
+      fullscreenBlockedRef.current ||
+
+
+
+      cameraPausedRef.current
 
 
 
@@ -5418,6 +5513,13 @@ const pauseForFullscreenLoss = ({ duringStartup = false } = {}) => {
 
   setFullscreenBlocked(true);
   fullscreenBlockedRef.current = true;
+  setCameraPaused(false);
+  setCameraPauseReason("");
+  cameraPausedRef.current = false;
+  if (cameraResumeTimerRef.current) {
+    window.clearTimeout(cameraResumeTimerRef.current);
+    cameraResumeTimerRef.current = null;
+  }
   dialogOpenRef.current = true;
   setShowEndConfirm(false);
   setShowStartupCancelConfirm(false);
@@ -5487,6 +5589,18 @@ useEffect(() => {
 
 
     fullscreenBlockedRef.current = false;
+
+
+
+    setCameraPaused(false);
+
+
+
+    setCameraPauseReason("");
+
+
+
+    cameraPausedRef.current = false;
 
 
 
@@ -5618,7 +5732,14 @@ useEffect(() => {
 
 
 
-    if (!answer || !sessionIdRef.current || busyRef.current || summaryRef.current || finalizingRef.current) return;
+    if (
+      !answer ||
+      !sessionIdRef.current ||
+      busyRef.current ||
+      cameraPausedRef.current ||
+      summaryRef.current ||
+      finalizingRef.current
+    ) return;
 
 
 
@@ -5807,6 +5928,10 @@ useEffect(() => {
 
 
         fullscreenBlockedRef.current ||
+
+
+
+        cameraPausedRef.current ||
 
 
 
@@ -6220,7 +6345,14 @@ const beginVoiceInterview = async () => {
   setShowStartupCancelConfirm(false);
   setShowFullscreenPrompt(false);
   setFullscreenBlocked(false);
+  setCameraPaused(false);
+  setCameraPauseReason("");
   fullscreenBlockedRef.current = false;
+  cameraPausedRef.current = false;
+  if (cameraResumeTimerRef.current) {
+    window.clearTimeout(cameraResumeTimerRef.current);
+    cameraResumeTimerRef.current = null;
+  }
   startupPausedRef.current = false;
   setStartupPaused(false);
   setStartupActive(true);
@@ -7060,6 +7192,22 @@ useEffect(() => {
 
 
 
+      if (cameraResumeTimerRef.current) {
+
+
+
+        window.clearTimeout(cameraResumeTimerRef.current);
+
+
+
+        cameraResumeTimerRef.current = null;
+
+
+
+      }
+
+
+
       stopListening();
 
 
@@ -7112,7 +7260,74 @@ useEffect(() => {
 
 
 
-    if (!started || busy || fullscreenBlocked || dialogOpen || summary || timeLeftSeconds == null || timeLeftSeconds <= 0) {
+    const trackingReadyForPause = faceTracking.detectorReady || Boolean(faceTracking.detectorError);
+
+    const faceIssue = !trackingReadyForPause
+      ? ""
+      : !faceTracking.cameraOn
+      ? "camera_off"
+      : !faceTracking.detectorError && faceTracking.detectorReady && !faceTracking.faceDetected
+      ? "face_missing"
+      : !faceTracking.detectorError && faceTracking.detectorReady && !faceTracking.faceInsideFrame
+      ? "face_out_of_frame"
+      : "";
+
+    const verificationRestored =
+      faceTracking.cameraOn &&
+      (faceTracking.detectorError ||
+        (faceTracking.detectorReady && faceTracking.faceDetected && faceTracking.faceInsideFrame));
+
+    if (
+      started &&
+      !startupActive &&
+      !summary &&
+      !dialogOpen &&
+      !fullscreenBlocked &&
+      !busy &&
+      !endRequestedRef.current &&
+      !finalizingRef.current
+    ) {
+      if (faceIssue) {
+        if (cameraResumeTimerRef.current) {
+          window.clearTimeout(cameraResumeTimerRef.current);
+          cameraResumeTimerRef.current = null;
+        }
+
+        if (!cameraPausedRef.current) {
+          rememberResumeMode();
+          interruptInterviewFlowRef.current?.();
+          cameraPausedRef.current = true;
+          setCameraPaused(true);
+        }
+
+        setCameraPauseReason(faceIssue);
+        setStatus(CAMERA_PAUSE_COPY[faceIssue]?.detail || "Interview paused for camera verification.");
+        setError("");
+      } else if (cameraPausedRef.current && verificationRestored && !cameraResumeTimerRef.current) {
+        setStatus("Camera verification restored. Resuming interview...");
+        cameraResumeTimerRef.current = window.setTimeout(() => {
+          cameraResumeTimerRef.current = null;
+
+          if (
+            !startedRef.current ||
+            summaryRef.current ||
+            dialogOpenRef.current ||
+            fullscreenBlockedRef.current ||
+            endRequestedRef.current ||
+            finalizingRef.current
+          ) {
+            return;
+          }
+
+          cameraPausedRef.current = false;
+        setCameraPaused(false);
+        setCameraPauseReason("");
+        void resumeInterviewAfterPauseRef.current?.();
+      }, CAMERA_RESTORE_RESUME_DELAY_MS);
+      }
+    }
+
+    if (!started || busy || cameraPaused || fullscreenBlocked || dialogOpen || summary || timeLeftSeconds == null || timeLeftSeconds <= 0) {
 
 
 
@@ -7200,7 +7415,21 @@ useEffect(() => {
 
 
 
-  }, [started, busy, fullscreenBlocked, dialogOpen, summary, timeLeftSeconds]);
+  }, [
+    started,
+    startupActive,
+    busy,
+    cameraPaused,
+    fullscreenBlocked,
+    dialogOpen,
+    summary,
+    timeLeftSeconds,
+    faceTracking.cameraOn,
+    faceTracking.detectorError,
+    faceTracking.detectorReady,
+    faceTracking.faceDetected,
+    faceTracking.faceInsideFrame,
+  ]);
 
 
 
@@ -7264,11 +7493,30 @@ useEffect(() => {
 
 
 
+  const cameraPauseCopy = CAMERA_PAUSE_COPY[cameraPauseReason] || {
+    title: "Interview paused",
+    detail: "Keep your camera on and your face inside the frame to continue.",
+  };
+
+
+
+  resumeInterviewAfterPauseRef.current = resumeInterviewAfterPause;
+
+
+
   const livePhase = fullscreenBlocked
 
 
 
     ? "Paused"
+
+
+
+    : cameraPaused
+
+
+
+      ? "Camera paused"
 
 
 
@@ -7337,6 +7585,10 @@ useEffect(() => {
 
 
     fullscreenBlocked,
+
+
+
+    cameraPaused,
 
 
 
@@ -7884,6 +8136,13 @@ useEffect(() => {
                   <div className={`face-tracking-warning ${faceTracking.stable ? "is-ok" : "is-warning"}`}>
                     {faceTracking.warning}
                   </div>
+                  {cameraPaused ? (
+                    <div className="camera-pause-overlay">
+                      <strong>{cameraPauseCopy.title}</strong>
+                      <span>{cameraPauseCopy.detail}</span>
+                      <small>Interview will resume automatically after verification is restored.</small>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="face-tracking-checks is-dark">
@@ -8168,7 +8427,7 @@ useEffect(() => {
 
 
 
-                  <button className="mock-btn" onClick={startListening} disabled={busy || fullscreenBlocked || Boolean(summary)} style={{ background: "rgba(255,255,255,0.16)" }}>
+                  <button className="mock-btn" onClick={startListening} disabled={busy || cameraPaused || fullscreenBlocked || Boolean(summary)} style={{ background: "rgba(255,255,255,0.16)" }}>
 
 
 
@@ -8240,7 +8499,7 @@ useEffect(() => {
 
 
 
-                  <button className="mock-btn" onClick={submitAnswer} disabled={!clean(transcript) || busy || aiSpeaking || fullscreenBlocked || Boolean(summary)} style={{ background: "linear-gradient(135deg, #059669, #10b981)" }}>
+                  <button className="mock-btn" onClick={submitAnswer} disabled={!clean(transcript) || busy || aiSpeaking || cameraPaused || fullscreenBlocked || Boolean(summary)} style={{ background: "linear-gradient(135deg, #059669, #10b981)" }}>
 
 
 
