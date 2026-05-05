@@ -5,6 +5,7 @@ import { useScrollToTop } from "../hooks/useScrollToTop";
 import logo from "../assets/Website Logo.png";
 import { useInterviewFullscreenGuard } from "../hooks/useInterviewFullscreenGuard";
 import { useRevealFullscreenWarning } from "../hooks/useRevealFullscreenWarning";
+import { clearInterviewFullscreenGuard, isFullscreenActive } from "../utils/interviewFullscreenGuard";
 
 function Instructions() {
   useScrollToTop();
@@ -52,6 +53,29 @@ function Instructions() {
   
   const [agreedToAll, setAgreedToAll] = useState(false);
   const [alertMessage, setAlertMessage] = useState("");
+  const [showBackConfirmation, setShowBackConfirmation] = useState(false);
+
+  // Auto-scroll to back confirmation modal when it appears
+  React.useEffect(() => {
+    if (showBackConfirmation) {
+      const timeoutId = window.setTimeout(() => {
+        const modal = document.querySelector("[data-back-confirmation]");
+        if (modal) {
+          modal.scrollIntoView({
+            behavior: "smooth",
+            block: "center",
+            inline: "nearest",
+          });
+          if (typeof modal.focus === "function") {
+            modal.focus({ preventScroll: true });
+          }
+        } else {
+          window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+        }
+      }, 50);
+      return () => window.clearTimeout(timeoutId);
+    }
+  }, [showBackConfirmation]);
 
   const handleContinue = () => {
     if (!agreedToAll) {
@@ -59,31 +83,46 @@ function Instructions() {
       setTimeout(() => setAlertMessage(""), 3000);
       return;
     }
-    if (location.state?.permissionChecked) {
-      navigate("/interview", { state: location.state || {} });
-      return;
-    }
-    navigate("/permissions", {
-      state: {
-        ...(location.state || {}),
-        fromInstructions: true,
-      },
-    });
+    // Navigate directly to interview page
+    navigate("/interview", { state: location.state || {} });
   };
 
   const handleBack = () => {
-    if (location.state?.returnTo) {
-      navigate(location.state.returnTo, {
-        state: location.state.returnState || {},
-        replace: true,
-      });
-      return;
+    setShowBackConfirmation(true);
+  };
+
+  const handleBackCancel = () => {
+    setShowBackConfirmation(false);
+  };
+
+  const handleBackProceed = async () => {
+    console.log("[Instructions] User confirmed back - exiting fullscreen and navigating to permissions");
+    setShowBackConfirmation(false);
+    
+    // Exit fullscreen mode if active
+    if (isFullscreenActive()) {
+      try {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        } else if (document.webkitExitFullscreen) {
+          document.webkitExitFullscreen();
+        } else if (document.mozCancelFullScreen) {
+          document.mozCancelFullScreen();
+        } else if (document.msExitFullscreen) {
+          document.msExitFullscreen();
+        }
+        console.log("[Instructions] ✅ Exited fullscreen mode");
+      } catch (err) {
+        console.error("[Instructions] Error exiting fullscreen:", err);
+      }
     }
-    if (window.history.length > 1) {
-      navigate(-1);
-      return;
-    }
-    navigate("/", { replace: true });
+    
+    // Clear the fullscreen guard
+    clearInterviewFullscreenGuard();
+    console.log("[Instructions] Fullscreen guard cleared");
+    
+    // Navigate back to permissions
+    navigate("/permissions", { replace: true });
   };
 
   const instructions = [
@@ -236,6 +275,35 @@ function Instructions() {
           </div>
         </div>
       </div>
+
+      {/* Back Confirmation Modal */}
+      {showBackConfirmation && (
+        <div className="voice-ai-modal-overlay">
+          <div className="voice-ai-modal-card" data-back-confirmation tabIndex="-1">
+            <div className="voice-ai-modal-eyebrow">⚠️ Cancel Interview</div>
+            <h2 className="voice-ai-modal-title">
+              Going back will cancel your interview and all saved data will be lost.
+            </h2>
+            <p className="voice-ai-modal-copy">
+              Are you sure you want to proceed? You will need to start over from the beginning.
+            </p>
+            <div className="voice-ai-modal-actions">
+              <button className="go-back-btn" onClick={handleBackCancel}>
+                Cancel
+              </button>
+              <button 
+                className="mock-btn" 
+                onClick={handleBackProceed}
+                style={{ background: "#dc2626" }}
+              >
+                Proceed
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Fullscreen Warning Modal */}
       {fullscreenBlocked ? (
         <div className="voice-ai-modal-overlay">
           <div className="voice-ai-modal-card" data-fullscreen-warning tabIndex="-1">

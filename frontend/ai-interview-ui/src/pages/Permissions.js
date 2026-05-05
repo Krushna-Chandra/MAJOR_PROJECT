@@ -2,6 +2,8 @@ import React, { useState, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import "../App.css";
 import { useScrollToTop } from "../hooks/useScrollToTop";
+import { activateInterviewFullscreenGuard, clearInterviewFullscreenGuard } from "../utils/interviewFullscreenGuard";
+import { useInterviewFullscreenGuard } from "../hooks/useInterviewFullscreenGuard";
 
 // vector icons (simple, professional)
 const CameraIcon = () => (
@@ -26,34 +28,57 @@ const BrowserIcon = () => (
   </svg>
 );
 
+const FullscreenIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+  </svg>
+);
+
 function Permissions() {
+  useScrollToTop();
   const navigate = useNavigate();
   const location = useLocation();
   const videoRef = useRef(null);
+  const permissionsPageRef = useRef(null);
   const [permissions, setPermissions] = useState({
     camera: false,
     microphone: false,
-    browser: false
+    browser: false,
+    fullscreen: false
   });
   const [deniedPerm, setDeniedPerm] = useState({
     camera: false,
     microphone: false,
-    browser: false
+    browser: false,
+    fullscreen: false
   });
   // loading state per permission so we can show cursor/spinner
   const [loadingPerm, setLoadingPerm] = useState({
     camera: false,
     microphone: false,
-    browser: false
+    browser: false,
+    fullscreen: false
   });
   const [audioDb, setAudioDb] = useState(-Infinity);
   const [browserName, setBrowserName] = useState("");
+  const [showFullscreenModal, setShowFullscreenModal] = useState(false);
   const micStreamRef = useRef(null);
 
+  // Fullscreen guard hook - shows warning if user exits fullscreen
+  const handleCancelFullscreen = () => {
+    clearInterviewFullscreenGuard();
+    navigate("/", { replace: true });
+  };
+
+  const { fullscreenBlocked, restoreFullscreen, cancelFullscreenGuard } =
+    useInterviewFullscreenGuard({ targetRef: permissionsPageRef, onCancel: handleCancelFullscreen });
+  // Don't show warning on Permissions page - only track fullscreen state
+  // useRevealFullscreenWarning(fullscreenBlocked);
+
   const resetPermissionsState = () => {
-    setPermissions({ camera: false, microphone: false, browser: false });
-    setDeniedPerm({ camera: false, microphone: false, browser: false });
-    setLoadingPerm({ camera: false, microphone: false, browser: false });
+    setPermissions({ camera: false, microphone: false, browser: false, fullscreen: false });
+    setDeniedPerm({ camera: false, microphone: false, browser: false, fullscreen: false });
+    setLoadingPerm({ camera: false, microphone: false, browser: false, fullscreen: false });
     setBrowserName("");
     setAudioDb(-Infinity);
     if (micStreamRef.current) {
@@ -202,8 +227,51 @@ function Permissions() {
     }, 500);
   };
 
-  const goProceed = () => {
+  const requestFullscreen = () => {
+    setShowFullscreenModal(true);
+  };
+
+  const enterFullscreenMode = async () => {
+    console.log("[Permissions] User clicked 'Enter Fullscreen' button");
+    setShowFullscreenModal(false);
+    setLoadingPerm((l) => ({ ...l, fullscreen: true }));
+    setDeniedPerm((d) => ({ ...d, fullscreen: false }));
+    try {
+      console.log("[Permissions] Requesting fullscreen API...");
+      const elem = document.documentElement;
+      if (elem.requestFullscreen) {
+        await elem.requestFullscreen();
+      } else if (elem.webkitRequestFullscreen) {
+        elem.webkitRequestFullscreen();
+      } else if (elem.mozRequestFullScreen) {
+        elem.mozRequestFullScreen();
+      } else if (elem.msRequestFullscreen) {
+        elem.msRequestFullscreen();
+      }
+      console.log("[Permissions] ✅ Fullscreen entered successfully");
+      // Activate the fullscreen guard to keep fullscreen active until interview ends
+      activateInterviewFullscreenGuard();
+      console.log("[Permissions] Fullscreen guard activated");
+      setPermissions((p) => ({ ...p, fullscreen: true }));
+    } catch (err) {
+      console.error("[Permissions] ❌ Failed to enter fullscreen:", err);
+      setDeniedPerm((d) => ({ ...d, fullscreen: true }));
+    } finally {
+      setLoadingPerm((l) => ({ ...l, fullscreen: false }));
+    }
+  };
+
+  const cancelFullscreen = () => {
+    setShowFullscreenModal(false);
+  };
+
+  const goProceed = async () => {
     if (allPermissionsGranted) {
+      // Ensure fullscreen is restored before navigation
+      if (fullscreenBlocked) {
+        await restoreFullscreen();
+      }
+      
       if (location.state?.fromInstructions) {
         navigate("/interview", {
           state: {
@@ -222,7 +290,7 @@ function Permissions() {
     }
   };
 
-  const allPermissionsGranted = permissions.camera && permissions.microphone && permissions.browser;
+  const allPermissionsGranted = permissions.camera && permissions.microphone && permissions.browser && permissions.fullscreen;
 
   // change cursor to wait when any permission is loading
   React.useEffect(() => {
@@ -333,7 +401,97 @@ function Permissions() {
   }, []);
 
   return (
-    <div className="mock-page reveal" style={{ minHeight: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+    <div className="mock-page reveal" ref={permissionsPageRef} style={{ minHeight: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      {/* Fullscreen Confirmation Modal */}
+      {showFullscreenModal && (
+        <div style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: "rgba(0, 0, 0, 0.5)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 9999
+        }}>
+          <div style={{
+            background: "white",
+            borderRadius: 8,
+            padding: 32,
+            boxShadow: "0 10px 40px rgba(0, 0, 0, 0.2)",
+            maxWidth: 400,
+            textAlign: "center"
+          }}>
+            <h3 style={{ marginTop: 0, fontSize: 20, fontWeight: 700, marginBottom: 12 }}>Enter Fullscreen Mode</h3>
+            <p style={{ margin: "0 0 24px 0", fontSize: 14, color: "#666", lineHeight: 1.5 }}>
+              Your interview will run in fullscreen mode to ensure a secure testing environment. You will be unable to switch windows during the assessment.
+            </p>
+            <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
+              <button
+                onClick={cancelFullscreen}
+                style={{
+                  padding: "10px 24px",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  background: "#f3f4f6",
+                  border: "1px solid #d1d5db",
+                  borderRadius: 4,
+                  cursor: "pointer",
+                  transition: "all 0.2s"
+                }}
+                onMouseEnter={(e) => e.target.style.background = "#e5e7eb"}
+                onMouseLeave={(e) => e.target.style.background = "#f3f4f6"}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={enterFullscreenMode}
+                style={{
+                  padding: "10px 24px",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  background: "#3b82f6",
+                  color: "white",
+                  border: "none",
+                  borderRadius: 4,
+                  cursor: "pointer",
+                  transition: "all 0.2s"
+                }}
+                onMouseEnter={(e) => e.target.style.background = "#2563eb"}
+                onMouseLeave={(e) => e.target.style.background = "#3b82f6"}
+              >
+                Enter Fullscreen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Fullscreen Blocked Warning Modal */}
+      {fullscreenBlocked ? (
+        <div className="voice-ai-modal-overlay">
+          <div className="voice-ai-modal-card" data-fullscreen-warning tabIndex="-1">
+            <div className="voice-ai-modal-eyebrow">Fullscreen Required</div>
+            <h2 className="voice-ai-modal-title">
+              The system check has been paused because you exited fullscreen mode.
+            </h2>
+            <p className="voice-ai-modal-copy">
+              Stay in fullscreen to continue your system check and permissions verification, or cancel and return home.
+            </p>
+            <div className="voice-ai-modal-actions">
+              <button className="go-back-btn" onClick={cancelFullscreenGuard}>
+                Cancel
+              </button>
+              <button className="mock-btn" onClick={restoreFullscreen}>
+                Resume
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {/* No mini navbar on this page per request */}
       {/* overall status banner (only when every permission granted) */}
       {allPermissionsGranted && (
@@ -412,6 +570,21 @@ function Permissions() {
                   style={{ cursor: loadingPerm.browser ? "wait" : "pointer", fontSize: 12, minWidth: 60, height: 38 }}
                 >
                   {loadingPerm.browser ? <span className="spinner" /> : permissions.browser ? "✓" : deniedPerm.browser ? "✕" : "Check"}
+                </button>
+              </div>
+
+              {/* fullscreen */}
+              <div
+                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 14, gap: 12, height: 40 }}
+              >
+                <span className="perm-item" onClick={requestFullscreen} style={{cursor:'pointer'}}><FullscreenIcon className="perm-icon" /> Fullscreen</span>
+                <button
+                  className={`mock-btn grant-btn ${permissions.fullscreen ? "granted" : deniedPerm.fullscreen ? "denied" : ""}`}
+                  disabled={permissions.fullscreen || loadingPerm.fullscreen}
+                  onClick={requestFullscreen}
+                  style={{ cursor: loadingPerm.fullscreen ? "wait" : "pointer", fontSize: 12, minWidth: 60, height: 38 }}
+                >
+                  {loadingPerm.fullscreen ? <span className="spinner" /> : permissions.fullscreen ? "✓" : deniedPerm.fullscreen ? "✕" : "Grant"}
                 </button>
               </div>
 

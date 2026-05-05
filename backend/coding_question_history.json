@@ -14,14 +14,14 @@
     "count pairs with target sum parity",
     "alternating case string",
     "weighted ascii sum",
-    "count even numbers in a list",
-    "reverse each word",
+    "count vowels in a string",
     "sum of digits",
     "count words with vowels",
+    "reverse each word",
+    "second largest number",
+    "count even numbers in a list",
     "largest digit in a number",
-    "count vowels in a string",
-    "count positive numbers",
-    "second largest number"
+    "count positive numbers"
   ],
   "hard": [
     "trapping rain water",
