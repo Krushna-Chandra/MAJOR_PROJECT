@@ -15146,6 +15146,84 @@ button {
 
 }
 
+.voice-ai-root--launching {
+
+  background: #f4f0ff;
+
+  color: #111827;
+
+}
+
+.voice-ai-root--launching::before,
+.voice-ai-root--launching .voice-ai-orb,
+.voice-ai-root--launching .voice-ai-inner {
+
+  display: none;
+
+}
+
+.voice-ai-root--launching .voice-ai-startup-overlay {
+
+  background: #f4f0ff;
+
+  color: #111827;
+
+  backdrop-filter: none;
+
+}
+
+.voice-ai-root--launching .voice-ai-startup-orb {
+
+  display: none;
+
+}
+
+.interview-launch-page--blurred {
+
+  filter: blur(7px);
+
+  transform: scale(1.01);
+
+  pointer-events: none;
+
+  user-select: none;
+
+  transition: filter 0.22s ease, transform 0.22s ease;
+
+}
+
+.voice-ai-root--hosted-startup {
+
+  position: fixed;
+
+  inset: 0;
+
+  z-index: 1500;
+
+  min-height: 100vh;
+
+  overflow: hidden;
+
+}
+
+.voice-ai-root--hosted-startup.voice-ai-root--launching {
+
+  background: rgba(244, 240, 255, 0.34);
+
+  color: #111827;
+
+  backdrop-filter: blur(9px);
+
+}
+
+.voice-ai-root--hosted-startup.voice-ai-root--launching .voice-ai-startup-overlay {
+
+  background: rgba(244, 240, 255, 0.28);
+
+  backdrop-filter: blur(8px);
+
+}
+
 
 
 .voice-ai-orb {
@@ -20125,7 +20203,7 @@ button {
 
   inset: 0;
 
-  z-index: 1200;
+  z-index: 1600;
 
   display: grid;
 
@@ -20284,6 +20362,58 @@ button {
 [data-back-confirmation] .voice-ai-modal-actions .go-back-btn {
 
   margin-top: 0;
+
+}
+
+[data-startup-cancel-confirmation] .voice-ai-modal-title,
+
+[data-startup-cancel-confirmation] .voice-ai-modal-copy {
+
+  text-align: center;
+
+}
+
+[data-startup-cancel-confirmation] .voice-ai-modal-actions {
+
+  justify-content: center;
+
+  align-items: center;
+
+  gap: 16px;
+
+}
+
+[data-startup-cancel-confirmation] .voice-ai-modal-actions .mock-btn,
+
+[data-startup-cancel-confirmation] .voice-ai-modal-actions .go-back-btn {
+
+  min-width: 190px;
+
+  margin-top: 0;
+
+}
+
+.voice-ai-startup-modal-logo {
+
+  display: block;
+
+  width: min(100%, 420px);
+
+  height: auto;
+
+  margin: 0 auto 18px;
+
+  border-radius: 14px;
+
+  box-shadow: 0 18px 38px rgba(2, 6, 23, 0.28);
+
+}
+
+[data-startup-welcome="true"] .voice-ai-modal-title,
+
+[data-startup-welcome="true"] .voice-ai-modal-copy {
+
+  text-align: center;
 
 }
 

@@ -3,7 +3,11 @@ import { useScrollToTop } from "../hooks/useScrollToTop";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useInterviewFullscreenGuard } from "../hooks/useInterviewFullscreenGuard";
 import { useRevealFullscreenWarning } from "../hooks/useRevealFullscreenWarning";
-import { clearInterviewFullscreenGuard } from "../utils/interviewFullscreenGuard";
+import {
+  clearInterviewFullscreenGuard,
+  isFullscreenActive,
+  requestInterviewFullscreen,
+} from "../utils/interviewFullscreenGuard";
 
 
 
@@ -12,6 +16,7 @@ import axios from "axios";
 
 
 import "../App.css";
+import interviewrWordmark from "../assets/Website Logo.png";
 
 
 
@@ -40,6 +45,10 @@ const INTERVIEW_STORAGE_KEY = "voiceInterviewActiveSession";
 
 
 const STARTUP_LAUNCH_COUNTDOWN_SECONDS = 3;
+
+const STARTUP_CAMERA_TIMEOUT_MS = 2500;
+
+const STARTUP_HANDOFF_STALL_MS = 6500;
 
 
 
@@ -2361,13 +2370,21 @@ const normalizeSavedSessionSnapshot = (snapshot) => {
 
 const wait = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
+const estimateSpeechTimeoutMs = (value) => {
+  const wordCount = clean(value).split(" ").filter(Boolean).length;
+  return Math.min(30000, Math.max(5000, wordCount * 420 + 1800));
+};
+
+const withTimeout = (promise, ms, fallbackValue) =>
+  Promise.race([promise, wait(ms).then(() => fallbackValue)]);
 
 
 
 
 
 
-function VoiceInterview({ embeddedContext = null, autoStart = false } = {}) {
+
+function VoiceInterview({ embeddedContext = null, autoStart = false, startupOverlayMode = false } = {}) {
 
 
 
@@ -2394,6 +2411,8 @@ function VoiceInterview({ embeddedContext = null, autoStart = false } = {}) {
   const effectiveState = embeddedContext || location.state;
 
   const forceFreshSession = Boolean(effectiveState?.forceFreshSession);
+
+  const forceStartupFullscreenPrompt = Boolean(effectiveState?.forceStartupFullscreenPrompt);
 
 
 
@@ -2494,6 +2513,7 @@ const pauseForFullscreenLossRef = useRef(() => {});
   const fullscreenBlockedRef = useRef(false);
   const autoStartedRef = useRef(false);
   const beginVoiceInterviewRef = useRef(null);
+  const forcedStartupPromptShownRef = useRef(false);
 
 
 
@@ -2642,6 +2662,10 @@ const pauseForFullscreenLossRef = useRef(() => {});
 
 
 
+  const [showStartupCancelConfirm, setShowStartupCancelConfirm] = useState(false);
+
+
+
   const [showFullscreenPrompt, setShowFullscreenPrompt] = useState(false);
 
 
@@ -2655,8 +2679,6 @@ const pauseForFullscreenLossRef = useRef(() => {});
 
 
   const [startupPaused, setStartupPaused] = useState(false);
-
-
 
   const [startupMessage, setStartupMessage] = useState(STARTUP_STAGE_MESSAGES[0]);
 
@@ -2697,13 +2719,13 @@ const pauseForFullscreenLossRef = useRef(() => {});
     restoreFullscreen: restoreSetupFullscreen,
     cancelFullscreenGuard: cancelSetupFullscreen,
   } = useInterviewFullscreenGuard({
-    enabled: !started && !startupActive && !summary,
+    enabled: !autoStart && !started && !startupActive && !summary,
     onCancel: cancelSetupFullscreenGuard,
   });
 
 
 
-  const dialogOpen = showEndConfirm || showFullscreenPrompt;
+  const dialogOpen = showEndConfirm || showStartupCancelConfirm || showFullscreenPrompt;
   useRevealFullscreenWarning(showFullscreenPrompt || (setupFullscreenBlocked && !dialogOpen));
 
 
@@ -3682,12 +3704,20 @@ const isStartupLaunchActive = (runId) =>
   !endRequestedRef.current &&
   !finalizingRef.current;
 
+const isStartupLaunchCurrent = (runId) =>
+  startupRunIdRef.current === runId &&
+  startupActiveRef.current &&
+  !startupPausedRef.current &&
+  !summaryRef.current &&
+  !endRequestedRef.current &&
+  !finalizingRef.current;
+
 const runStartupLaunchCountdown = async (runId) => {
   for (let remaining = STARTUP_LAUNCH_COUNTDOWN_SECONDS; remaining > 0; remaining -= 1) {
-    if (!isStartupLaunchActive(runId)) return false;
+    if (!isStartupLaunchCurrent(runId)) return false;
     setStartupCountdown(remaining);
     await wait(1000);
-    if (!isStartupLaunchActive(runId)) return false;
+    if (!isStartupLaunchCurrent(runId)) return false;
   }
 
   setStartupCountdown(null);
@@ -3849,11 +3879,19 @@ const runStartupLaunchCountdown = async (runId) => {
 
 
 
-  const openResultsPage = (reportData, sessionKey) => {
+  const openResultsPage = async (reportData, sessionKey) => {
 
 
 
     const resolvedSessionId = safeText(sessionKey) || safeText(sessionIdRef.current) || `local-${Date.now()}`;
+
+    summaryRef.current = reportData;
+    endRequestedRef.current = true;
+    clearInterviewFullscreenGuard();
+    stopListening();
+    stopSpeech();
+    stopCamera();
+    await exitFullscreenForResults();
 
 
 
@@ -4045,19 +4083,25 @@ const runStartupLaunchCountdown = async (runId) => {
 
 
 
+      let settled = false;
+      let speechTimeoutId = null;
+
+      const finishSpeech = (result) => {
+        if (settled) return;
+        settled = true;
+        if (speechTimeoutId) window.clearTimeout(speechTimeoutId);
+        speakingRef.current = false;
+        setAiSpeaking(false);
+        resolve(result);
+      };
+
+
+
       utterance.onend = () => {
 
 
 
-        speakingRef.current = false;
-
-
-
-        setAiSpeaking(false);
-
-
-
-        resolve(flowToken == null || flowToken === flowTokenRef.current);
+        finishSpeech(flowToken == null || flowToken === flowTokenRef.current);
 
 
 
@@ -4065,27 +4109,19 @@ const runStartupLaunchCountdown = async (runId) => {
 
 
 
-      utterance.onerror = () => {
+      utterance.onerror = () => finishSpeech(true);
 
 
 
-        speakingRef.current = false;
+      speechTimeoutId = window.setTimeout(() => finishSpeech(true), estimateSpeechTimeoutMs(value));
 
 
 
-        setAiSpeaking(false);
-
-
-
-        resolve(false);
-
-
-
-      };
-
-
-
-      window.speechSynthesis.speak(utterance);
+      try {
+        window.speechSynthesis.speak(utterance);
+      } catch {
+        finishSpeech(true);
+      }
 
 
 
@@ -4237,51 +4273,19 @@ const runStartupLaunchCountdown = async (runId) => {
 
 
 
-    if (document.fullscreenElement) return true;
+    if (isFullscreenActive()) return true;
 
 
 
-    const target = document.documentElement;
+    await requestInterviewFullscreen(document.documentElement);
 
 
 
-    if (!target.requestFullscreen) throw new Error("Fullscreen is not supported in this browser.");
-
-
-
-    await target.requestFullscreen();
-
-
-
-    if (!document.fullscreenElement) throw new Error("Fullscreen did not start.");
+    if (!isFullscreenActive()) throw new Error("Fullscreen did not start.");
 
 
 
     return true;
-
-
-
-  };
-
-
-
-
-
-
-
-  const exitFullscreen = async () => {
-
-
-
-    try {
-
-
-
-      if (document.fullscreenElement) await document.exitFullscreen();
-
-
-
-    } catch {}
 
 
 
@@ -4406,6 +4410,41 @@ const runStartupLaunchCountdown = async (runId) => {
 
 
     cameraRef.current = null;
+
+
+
+  };
+
+
+
+  const exitFullscreenForResults = async () => {
+
+
+
+    try {
+
+
+
+      const exitFullscreen =
+        document.exitFullscreen ||
+        document.webkitExitFullscreen ||
+        document.msExitFullscreen;
+
+
+
+      if (isFullscreenActive() && exitFullscreen) {
+
+
+
+        await exitFullscreen.call(document);
+
+
+
+      }
+
+
+
+    } catch {}
 
 
 
@@ -4909,7 +4948,7 @@ const runStartupLaunchCountdown = async (runId) => {
 
 
 
-        openResultsPage(fallbackSummary, fallbackSummary.session_id);
+        await openResultsPage(fallbackSummary, fallbackSummary.session_id);
 
 
 
@@ -4941,7 +4980,7 @@ const runStartupLaunchCountdown = async (runId) => {
 
 
 
-        openResultsPage(fallbackSummary, activeSessionId);
+        await openResultsPage(fallbackSummary, activeSessionId);
 
 
 
@@ -5065,7 +5104,7 @@ const runStartupLaunchCountdown = async (runId) => {
 
 
 
-      openResultsPage(normalizedSummary, response.data?.session_id || activeSessionId);
+      await openResultsPage(normalizedSummary, response.data?.session_id || activeSessionId);
 
 
 
@@ -5137,7 +5176,7 @@ const runStartupLaunchCountdown = async (runId) => {
 
 
 
-      openResultsPage(fallbackSummary, fallbackSummary.session_id);
+      await openResultsPage(fallbackSummary, fallbackSummary.session_id);
 
 
 
@@ -5304,10 +5343,12 @@ const runStartupLaunchCountdown = async (runId) => {
 const cancelStartupPause = () => {
   startupRunIdRef.current += 1;
   startupPausedRef.current = false;
+  startedRef.current = false;
   setStartupPaused(false);
   setStartupCountdown(null);
   setStartupActive(false);
   startupActiveRef.current = false;
+  setShowStartupCancelConfirm(false);
   setShowFullscreenPrompt(false);
   setFullscreenBlocked(false);
   fullscreenBlockedRef.current = false;
@@ -5327,6 +5368,14 @@ const cancelStartupPause = () => {
   setSessionMeta({});
   setError("");
   setStatus("Interview start cancelled.");
+  clearInterviewFullscreenGuard();
+  navigate("/", { replace: true });
+};
+
+const confirmStartupCancel = () => {
+  setShowFullscreenPrompt(false);
+  setShowStartupCancelConfirm(true);
+  dialogOpenRef.current = true;
 };
 
 const pauseForFullscreenLoss = ({ duringStartup = false } = {}) => {
@@ -5365,11 +5414,40 @@ const pauseForFullscreenLoss = ({ duringStartup = false } = {}) => {
   fullscreenBlockedRef.current = true;
   dialogOpenRef.current = true;
   setShowEndConfirm(false);
+  setShowStartupCancelConfirm(false);
   setShowFullscreenPrompt(true);
   setError("");
 };
 
 pauseForFullscreenLossRef.current = pauseForFullscreenLoss;
+
+useEffect(() => {
+  if (
+    !startupActive ||
+    started ||
+    dialogOpen ||
+    summary ||
+    startupMessage !== STARTUP_STAGE_MESSAGES[4]
+  ) {
+    return undefined;
+  }
+
+  const timeoutId = window.setTimeout(() => {
+    if (
+      startupActiveRef.current &&
+      !startedRef.current &&
+      !dialogOpenRef.current &&
+      !summaryRef.current &&
+      !endRequestedRef.current &&
+      !finalizingRef.current
+    ) {
+      pauseForFullscreenLossRef.current({ duringStartup: true });
+    }
+  }, STARTUP_HANDOFF_STALL_MS);
+
+  return () => window.clearTimeout(timeoutId);
+}, [startupActive, started, dialogOpen, summary, startupMessage]);
+
   const finalizeEarlyExit = async ({ closingMessage = EARLY_END_CLOSING_MESSAGE } = {}) => {
 
 
@@ -6133,6 +6211,7 @@ const beginVoiceInterview = async () => {
   finalizingRef.current = false;
   dialogOpenRef.current = false;
   setShowEndConfirm(false);
+  setShowStartupCancelConfirm(false);
   setShowFullscreenPrompt(false);
   setFullscreenBlocked(false);
   fullscreenBlockedRef.current = false;
@@ -6147,11 +6226,22 @@ const beginVoiceInterview = async () => {
   setStatus("Starting interview...");
   setQuestion("");
   setCurrentSkill("");
+  startedRef.current = false;
   setStarted(false);
 
   try {
-    setStartupMessage("Entering fullscreen interview room");
-    await ensureFullscreen();
+    if (autoStart && forceStartupFullscreenPrompt && !forcedStartupPromptShownRef.current) {
+      forcedStartupPromptShownRef.current = true;
+      setStartupMessage("Fullscreen confirmation required");
+      await exitFullscreenForResults();
+      pauseForFullscreenLossRef.current({ duringStartup: true });
+      return;
+    }
+
+    if (!autoStart) {
+      setStartupMessage("Entering fullscreen interview room");
+      await ensureFullscreen();
+    }
     clearInterviewFullscreenGuard();
     if (!isStartupLaunchActive(startupRunId)) return;
 
@@ -6159,20 +6249,24 @@ const beginVoiceInterview = async () => {
     setStartupMessage(STARTUP_STAGE_MESSAGES[1]);
     setStatus("Preparing your AI interviewer, first question, and interview room...");
 
-    const cameraSetup = startCamera()
-      .then(async () => {
-        if (!isStartupLaunchActive(startupRunId)) {
-          stopCamera();
-          return new Error("Camera setup was interrupted.");
-        }
-        await attachCameraPreview();
-        if (!isStartupLaunchActive(startupRunId)) {
-          stopCamera();
-          return new Error("Camera setup was interrupted.");
-        }
-        return null;
-      })
-      .catch((cameraError) => cameraError);
+    const cameraSetup = withTimeout(
+      startCamera()
+        .then(async () => {
+          if (!isStartupLaunchActive(startupRunId)) {
+            stopCamera();
+            return new Error("Camera setup was interrupted.");
+          }
+          await attachCameraPreview();
+          if (!isStartupLaunchActive(startupRunId)) {
+            stopCamera();
+            return new Error("Camera setup was interrupted.");
+          }
+          return null;
+        })
+        .catch((cameraError) => cameraError),
+      STARTUP_CAMERA_TIMEOUT_MS,
+      new Error("Camera setup timed out.")
+    );
 
     const controller = new AbortController();
     requestControllerRef.current = controller;
@@ -6231,8 +6325,19 @@ const beginVoiceInterview = async () => {
 
     setStartupMessage(STARTUP_STAGE_MESSAGES[4]);
     const countdownCompleted = await runStartupLaunchCountdown(startupRunId);
-    if (!countdownCompleted || !isStartupLaunchActive(startupRunId)) return;
+    if (!countdownCompleted || !isStartupLaunchCurrent(startupRunId)) return;
 
+    if (!isFullscreenActive()) {
+      pauseForFullscreenLossRef.current({ duringStartup: true });
+      return;
+    }
+
+    dialogOpenRef.current = false;
+    setShowEndConfirm(false);
+    setShowStartupCancelConfirm(false);
+    setShowFullscreenPrompt(false);
+
+    startedRef.current = true;
     setStarted(true);
     setFullscreenBlocked(false);
     fullscreenBlockedRef.current = false;
@@ -6245,14 +6350,19 @@ const beginVoiceInterview = async () => {
     );
     setStartupActive(false);
     startupActiveRef.current = false;
+    busyRef.current = false;
+    setBusy(false);
     setInterviewEntering(true);
     await wait(650);
     if (!startedRef.current && !isStartupLaunchActive(startupRunId)) return;
     setInterviewEntering(false);
-    await runVoiceTurn({
+    const firstTurnStarted = await runVoiceTurn({
       preface: safeText(data.assistant_intro) || "Hello. Let us begin.",
       prompt: `Question 1. ${safeText(data.current_question)}`,
     });
+    if (!firstTurnStarted && isVoiceFlowActive(flowTokenRef.current)) {
+      startListening();
+    }
   } catch (requestError) {
     if (
       isCanceledRequest(requestError) ||
@@ -6312,6 +6422,7 @@ beginVoiceInterviewRef.current = beginVoiceInterview;
 
 
         setShowFullscreenPrompt(false);
+        setShowStartupCancelConfirm(false);
 
 
 
@@ -6364,6 +6475,7 @@ beginVoiceInterviewRef.current = beginVoiceInterview;
 
 
       setShowFullscreenPrompt(false);
+      setShowStartupCancelConfirm(false);
 
 
 
@@ -6741,7 +6853,7 @@ useEffect(() => {
       return;
     }
 
-    if (!document.fullscreenElement) {
+    if (!isFullscreenActive()) {
       pauseForFullscreenLossRef.current({
         duringStartup: startupActiveRef.current && !startedRef.current,
       });
@@ -6749,7 +6861,13 @@ useEffect(() => {
   };
 
   document.addEventListener("fullscreenchange", onFullscreenChange);
-  return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+  document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+  document.addEventListener("MSFullscreenChange", onFullscreenChange);
+  return () => {
+    document.removeEventListener("fullscreenchange", onFullscreenChange);
+    document.removeEventListener("webkitfullscreenchange", onFullscreenChange);
+    document.removeEventListener("MSFullscreenChange", onFullscreenChange);
+  };
 }, []);
 
 useEffect(() => {
@@ -6767,7 +6885,7 @@ useEffect(() => {
 
     const duringStartup = startupActiveRef.current && !startedRef.current;
     window.setTimeout(() => {
-      if (!document.fullscreenElement || duringStartup) {
+      if (!isFullscreenActive() || duringStartup) {
         pauseForFullscreenLossRef.current({ duringStartup });
       }
     }, 0);
@@ -6812,7 +6930,7 @@ useEffect(() => {
 
 
 
-      document.fullscreenElement
+      isFullscreenActive()
 
 
 
@@ -6945,10 +7063,6 @@ useEffect(() => {
 
 
       stopCamera();
-
-
-
-      exitFullscreen();
 
 
 
@@ -7385,11 +7499,18 @@ useEffect(() => {
 
 
 
+  const hideAutoStartIntro = autoStart && !started && !summary;
+  const isForcedStartupFullscreenPrompt =
+    startupPaused && forceStartupFullscreenPrompt && forcedStartupPromptShownRef.current && !started;
+
   return (
 
 
 
-    <div className="voice-ai-root" ref={rootRef}>
+    <div
+      className={`voice-ai-root ${hideAutoStartIntro ? "voice-ai-root--launching" : ""} ${startupOverlayMode ? "voice-ai-root--hosted-startup" : ""}`}
+      ref={rootRef}
+    >
 
 
 
@@ -8919,15 +9040,52 @@ useEffect(() => {
 
 
 
+          {showStartupCancelConfirm ? (
+            <div className="voice-ai-modal-card" data-startup-cancel-confirmation>
+              <div className="voice-ai-modal-eyebrow">Confirm Exit</div>
+              <h2 className="voice-ai-modal-title">Cancel this interview setup?</h2>
+              <p className="voice-ai-modal-copy">
+                The interview has not started yet. You can resume the fullscreen launch, or cancel this setup and return to the home page.
+              </p>
+              <div className="voice-ai-modal-actions">
+                <button className="mock-btn" onClick={restoreFullscreen}>
+                  Resume Interview
+                </button>
+                <button
+                  className="go-back-btn"
+                  onClick={cancelStartupPause}
+                  style={{ background: "linear-gradient(135deg, #dc2626, #f97316)", color: "#ffffff" }}
+                >
+                  Cancel Interview
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+
+
           {showFullscreenPrompt ? (
 
 
 
-            <div className="voice-ai-modal-card" data-fullscreen-warning tabIndex="-1">
+            <div
+              className="voice-ai-modal-card"
+              data-fullscreen-warning
+              data-startup-welcome={isForcedStartupFullscreenPrompt ? "true" : undefined}
+              tabIndex="-1"
+            >
 
 
 
-              <div className="voice-ai-modal-eyebrow">Fullscreen Required</div>
+              {isForcedStartupFullscreenPrompt ? (
+                <img
+                  src={interviewrWordmark}
+                  alt="Interviewr - Your Path to Career Success"
+                  className="voice-ai-startup-modal-logo"
+                />
+              ) : (
+                <div className="voice-ai-modal-eyebrow">Fullscreen Required</div>
+              )}
 
 
 
@@ -8935,7 +9093,11 @@ useEffect(() => {
 
 
 
-                {startupPaused
+                {isForcedStartupFullscreenPrompt
+
+                  ? "Ready to start your interview?"
+
+                  : startupPaused
 
 
 
@@ -8955,7 +9117,11 @@ useEffect(() => {
 
 
 
-                {startupPaused
+                {isForcedStartupFullscreenPrompt
+
+                  ? "Start the interview in fullscreen mode when you are ready."
+
+                  : startupPaused
 
 
 
@@ -8991,7 +9157,7 @@ useEffect(() => {
 
 
 
-                      cancelStartupPause();
+                      confirmStartupCancel();
 
 
 
@@ -9015,7 +9181,7 @@ useEffect(() => {
 
 
 
-                  {startupPaused ? "Cancel Interview Setup" : "End Interview"}
+                  {startupPaused ? "Cancel Interview" : "End Interview"}
 
 
 
@@ -9027,7 +9193,7 @@ useEffect(() => {
 
 
 
-                  Stay in Fullscreen
+                  {isForcedStartupFullscreenPrompt ? "Start Interview" : "Stay in Fullscreen"}
 
 
 
@@ -9067,7 +9233,7 @@ useEffect(() => {
             </p>
             <div className="voice-ai-modal-actions">
               <button className="go-back-btn" onClick={cancelSetupFullscreen}>
-                Cancel Interview Setup
+                Cancel Interview
               </button>
               <button className="mock-btn" onClick={restoreSetupFullscreen}>
                 Stay in Fullscreen
@@ -9079,7 +9245,7 @@ useEffect(() => {
 
 
 
-      {startupActive ? (
+      {startupActive && !dialogOpen ? (
 
 
 

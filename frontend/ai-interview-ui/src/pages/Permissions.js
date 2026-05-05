@@ -2,7 +2,11 @@ import React, { useState, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import "../App.css";
 import { useScrollToTop } from "../hooks/useScrollToTop";
-import { activateInterviewFullscreenGuard, clearInterviewFullscreenGuard } from "../utils/interviewFullscreenGuard";
+import {
+  clearInterviewFullscreenGuard,
+  isFullscreenActive,
+  requestInterviewFullscreen,
+} from "../utils/interviewFullscreenGuard";
 import { useInterviewFullscreenGuard } from "../hooks/useInterviewFullscreenGuard";
 
 // vector icons (simple, professional)
@@ -71,7 +75,7 @@ function Permissions() {
   };
 
   const { fullscreenBlocked, restoreFullscreen, cancelFullscreenGuard } =
-    useInterviewFullscreenGuard({ targetRef: permissionsPageRef, onCancel: handleCancelFullscreen });
+    useInterviewFullscreenGuard({ onCancel: handleCancelFullscreen });
   // Don't show warning on Permissions page - only track fullscreen state
   // useRevealFullscreenWarning(fullscreenBlocked);
 
@@ -238,19 +242,8 @@ function Permissions() {
     setDeniedPerm((d) => ({ ...d, fullscreen: false }));
     try {
       console.log("[Permissions] Requesting fullscreen API...");
-      const elem = document.documentElement;
-      if (elem.requestFullscreen) {
-        await elem.requestFullscreen();
-      } else if (elem.webkitRequestFullscreen) {
-        elem.webkitRequestFullscreen();
-      } else if (elem.mozRequestFullScreen) {
-        elem.mozRequestFullScreen();
-      } else if (elem.msRequestFullscreen) {
-        elem.msRequestFullscreen();
-      }
+      await requestInterviewFullscreen(document.documentElement);
       console.log("[Permissions] ✅ Fullscreen entered successfully");
-      // Activate the fullscreen guard to keep fullscreen active until interview ends
-      activateInterviewFullscreenGuard();
       console.log("[Permissions] Fullscreen guard activated");
       setPermissions((p) => ({ ...p, fullscreen: true }));
     } catch (err) {
@@ -267,9 +260,13 @@ function Permissions() {
 
   const goProceed = async () => {
     if (allPermissionsGranted) {
-      // Ensure fullscreen is restored before navigation
-      if (fullscreenBlocked) {
+      if (fullscreenBlocked || !isFullscreenActive()) {
         await restoreFullscreen();
+      }
+
+      if (!isFullscreenActive()) {
+        setDeniedPerm((d) => ({ ...d, fullscreen: true }));
+        return;
       }
       
       if (location.state?.fromInstructions) {

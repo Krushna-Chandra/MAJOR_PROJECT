@@ -21,6 +21,7 @@ OLLAMA_TIMEOUT_SECONDS = max(30, int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "300"))
 LIVE_AI_TIMEOUT_SECONDS = max(8, int(os.getenv("LIVE_AI_TIMEOUT_SECONDS", "12")))
 STARTUP_AI_TIMEOUT_SECONDS = max(LIVE_AI_TIMEOUT_SECONDS, int(os.getenv("STARTUP_AI_TIMEOUT_SECONDS", "20")))
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
+ENABLE_STARTUP_AI = os.getenv("ENABLE_STARTUP_AI", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 INTERVIEW_SESSIONS: Dict[str, Dict[str, Any]] = {}
 ACTIVE_SESSION_TTL_SECONDS = max(3600, int(os.getenv("ACTIVE_SESSION_TTL_SECONDS", "86400")))
@@ -850,6 +851,9 @@ async def _generate_json_with_fallback(
     temperature: float = 0.3,
     timeout_seconds: Optional[int] = None,
 ) -> Tuple[Dict[str, Any], str]:
+    if timeout_seconds == STARTUP_AI_TIMEOUT_SECONDS and not ENABLE_STARTUP_AI:
+        raise ProviderError("Startup AI generation is disabled; using fast local fallback.")
+
     errors = []
     for provider in order:
         try:
