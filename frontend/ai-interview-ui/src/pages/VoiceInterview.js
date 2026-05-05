@@ -2616,6 +2616,14 @@ const pauseForFullscreenLossRef = useRef(() => {});
 
 
 
+  const activeSpeechPhaseRef = useRef("answer");
+
+
+
+  const introTextRef = useRef("Hello. Let us begin.");
+
+
+
   const interruptInterviewFlowRef = useRef(() => {});
 
 
@@ -4310,7 +4318,35 @@ const runStartupLaunchCountdown = async (runId) => {
 
 
 
-    resumeModeRef.current = speakingRef.current ? "repeat-question" : "continue-answer";
+    if (activeSpeechPhaseRef.current === "intro") {
+
+
+
+      resumeModeRef.current = "restart-intro";
+
+
+
+      return;
+
+
+
+    }
+
+
+
+    resumeModeRef.current =
+
+
+
+      speakingRef.current || activeSpeechPhaseRef.current === "question" || activeSpeechPhaseRef.current === "transition"
+
+
+
+        ? "repeat-question"
+
+
+
+        : "continue-answer";
 
 
 
@@ -4621,7 +4657,7 @@ const runStartupLaunchCountdown = async (runId) => {
 
 
 
-  const runVoiceTurn = async ({ preface = "", prompt = "", restartListening = true } = {}) => {
+  const runVoiceTurn = async ({ preface = "", prompt = "", restartListening = true, prefacePhase = "transition" } = {}) => {
 
 
 
@@ -4631,6 +4667,8 @@ const runStartupLaunchCountdown = async (runId) => {
 
     flowTokenRef.current = flowToken;
 
+    if (!isVoiceFlowActive(flowToken)) return false;
+
 
 
 
@@ -4638,6 +4676,10 @@ const runStartupLaunchCountdown = async (runId) => {
 
 
     if (preface) {
+
+
+
+      activeSpeechPhaseRef.current = prefacePhase;
 
 
 
@@ -4661,6 +4703,10 @@ const runStartupLaunchCountdown = async (runId) => {
 
 
 
+      activeSpeechPhaseRef.current = "question";
+
+
+
       const promptFinished = await speak(prompt, { flowToken });
 
 
@@ -4681,6 +4727,10 @@ const runStartupLaunchCountdown = async (runId) => {
 
 
 
+      activeSpeechPhaseRef.current = "idle";
+
+
+
       return isVoiceFlowActive(flowToken);
 
 
@@ -4698,6 +4748,10 @@ const runStartupLaunchCountdown = async (runId) => {
 
 
 
+
+
+
+    activeSpeechPhaseRef.current = "answer";
 
 
 
@@ -4810,6 +4864,10 @@ const runStartupLaunchCountdown = async (runId) => {
 
 
     recognition.onstart = () => {
+
+
+
+      activeSpeechPhaseRef.current = "answer";
 
 
 
@@ -5317,7 +5375,7 @@ const runStartupLaunchCountdown = async (runId) => {
 
 
 
-  const resumeInterviewAfterPause = async ({ restoredFullscreen = false } = {}) => {
+  const resumeInterviewAfterPause = async ({ restoredFullscreen = false, restoredCamera = false } = {}) => {
 
 
 
@@ -5365,6 +5423,14 @@ const runStartupLaunchCountdown = async (runId) => {
 
 
 
+    const restorePrefix = restoredFullscreen
+      ? "Fullscreen restored."
+      : restoredCamera
+      ? "Camera verification restored."
+      : "Resuming the interview.";
+
+
+
     if (resumeModeRef.current === "repeat-question") {
 
 
@@ -5377,15 +5443,43 @@ const runStartupLaunchCountdown = async (runId) => {
 
 
 
-        preface: restoredFullscreen
+        preface: `${restorePrefix} I will repeat the current question.`,
 
 
 
-          ? "Fullscreen restored. I will repeat the current question."
+        prompt: `Question ${indexRef.current + 1}. ${safeText(questionRef.current) || "Please continue."}`,
 
 
 
-          : "Resuming the interview. I will repeat the current question.",
+      });
+
+
+
+      return;
+
+
+
+    }
+
+
+
+    if (resumeModeRef.current === "restart-intro") {
+
+
+
+      setStatus("Resuming interview...");
+
+
+
+      await runVoiceTurn({
+
+
+
+        preface: `${restorePrefix} I will restart the introduction. ${safeText(introTextRef.current) || "Hello. Let us begin."}`,
+
+
+
+        prefacePhase: "intro",
 
 
 
@@ -5417,15 +5511,7 @@ const runStartupLaunchCountdown = async (runId) => {
 
 
 
-      preface: restoredFullscreen
-
-
-
-        ? "Fullscreen restored. Please continue your answer."
-
-
-
-        : "Resuming the interview. Please continue your answer.",
+      preface: `${restorePrefix} Please continue your answer.`,
 
 
 
@@ -5434,9 +5520,6 @@ const runStartupLaunchCountdown = async (runId) => {
 
 
   };
-
-
-
 
 
 
@@ -5824,6 +5907,10 @@ useEffect(() => {
 
 
     stopListening();
+
+
+
+    activeSpeechPhaseRef.current = "evaluating";
 
 
 
@@ -6363,6 +6450,7 @@ const beginVoiceInterview = async () => {
   setInterviewEntering(false);
   setStatus("Starting interview...");
   setQuestion("");
+  introTextRef.current = "Hello. Let us begin.";
   setCurrentSkill("");
   startedRef.current = false;
   setStarted(false);
@@ -6433,6 +6521,7 @@ const beginVoiceInterview = async () => {
     setProviders(data.providers || {});
     setSessionMeta(data.meta || {});
     setQuestion(safeText(data.current_question));
+    introTextRef.current = safeText(data.assistant_intro) || "Hello. Let us begin.";
     setTotal(data.total_questions || 0);
     setIndex(0);
     
@@ -6491,11 +6580,13 @@ const beginVoiceInterview = async () => {
     busyRef.current = false;
     setBusy(false);
     setInterviewEntering(true);
+    activeSpeechPhaseRef.current = "intro";
     await wait(650);
-    if (!startedRef.current && !isStartupLaunchActive(startupRunId)) return;
+    if (!startedRef.current || !isStartupLaunchActive(startupRunId) || cameraPausedRef.current || fullscreenBlockedRef.current) return;
     setInterviewEntering(false);
     const firstTurnStarted = await runVoiceTurn({
-      preface: safeText(data.assistant_intro) || "Hello. Let us begin.",
+      preface: introTextRef.current,
+      prefacePhase: "intro",
       prompt: `Question 1. ${safeText(data.current_question)}`,
     });
     if (!firstTurnStarted && isVoiceFlowActive(flowTokenRef.current)) {
@@ -7322,12 +7413,12 @@ useEffect(() => {
           cameraPausedRef.current = false;
         setCameraPaused(false);
         setCameraPauseReason("");
-        void resumeInterviewAfterPauseRef.current?.();
+        void resumeInterviewAfterPauseRef.current?.({ restoredCamera: true });
       }, CAMERA_RESTORE_RESUME_DELAY_MS);
       }
     }
 
-    if (!started || busy || cameraPaused || fullscreenBlocked || dialogOpen || summary || timeLeftSeconds == null || timeLeftSeconds <= 0) {
+    if (!started || busy || cameraPausedRef.current || fullscreenBlocked || dialogOpen || summary || timeLeftSeconds == null || timeLeftSeconds <= 0) {
 
 
 

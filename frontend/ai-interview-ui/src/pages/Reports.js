@@ -258,10 +258,10 @@ function getRetryTarget(report, retryState) {
     return { path: "/resume-interview", state: null };
   }
   if (category === "hr") {
-    return { path: "/instructions", state: retryState };
+    return { path: "/permissions", state: retryState };
   }
   if (category === "technical" || category === "mock" || category === "general") {
-    return { path: "/instructions", state: retryState };
+    return { path: "/permissions", state: retryState };
   }
   return { path: "/dashboard", state: null };
 }
