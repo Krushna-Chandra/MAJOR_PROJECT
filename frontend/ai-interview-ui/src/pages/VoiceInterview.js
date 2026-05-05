@@ -1431,7 +1431,7 @@ const getInterviewPresenceMeta = ({
 
 
 
-const InterviewPresenceCard = ({ presence, showStatusStrip = true }) => (
+const InterviewPresenceCard = ({ presence, showStatusStrip = true, compact = false }) => (
 
 
 
@@ -1439,7 +1439,7 @@ const InterviewPresenceCard = ({ presence, showStatusStrip = true }) => (
 
 
 
-    <div className="voice-ai-presence-top">
+    <div className={`voice-ai-presence-top ${compact ? "is-compact" : ""}`}>
 
 
 
@@ -6750,65 +6750,19 @@ beginVoiceInterviewRef.current = beginVoiceInterview;
   }, [autoStart, started, busy, summary]);
 
 
-
-
-
-
-
   const handleEndInterview = () => {
-
-
-
     if (summaryRef.current || finalizingRef.current) {
-
-
-
       return;
-
-
-
     }
 
-
-
-
-
-
-
     rememberResumeMode();
-
-
-
     interruptInterviewFlow();
-
-
-
     cancelActiveRequest();
-
-
-
     dialogOpenRef.current = true;
-
-
-
     setError("");
-
-
-
     setStatus("Interview paused while you confirm the next step.");
-
-
-
     setShowEndConfirm(true);
-
-
-
   };
-
-
-
-
-
 
 
   const downloadReportPdf = () => {
@@ -7782,6 +7736,7 @@ useEffect(() => {
       : `${Math.floor(timeLeftSeconds / 60)
           .toString()
           .padStart(2, "0")}:${(timeLeftSeconds % 60).toString().padStart(2, "0")}`;
+  const showLiveTimer = adaptiveData.enabled || resolveTimerMinutes() || timeLeftSeconds != null;
 
 
 
@@ -7875,11 +7830,37 @@ useEffect(() => {
 
 
 
-        <div className="voice-ai-header">
+        <div className={`voice-ai-header ${started && !summary ? "voice-ai-live-navbar" : ""}`}>
 
 
 
-          <div>
+          {started && !summary ? (
+
+            <div className="voice-ai-navbar-brand" aria-label="Interviewr">
+
+              <img src={interviewrWordmark} alt="Interviewr" className="voice-ai-navbar-logo" />
+
+              <div className="navbar-brand-title">
+
+                <h2>
+                  INTERVIEW
+                  <span className="brand-r">R</span>
+                </h2>
+
+                <span className="navbar-brand-pipe">|</span>
+
+                <span className="navbar-brand-sub">
+                  <span>AI Powered</span>
+                  <span>Interview System</span>
+                </span>
+
+              </div>
+
+            </div>
+
+          ) : (
+
+            <div>
 
 
 
@@ -7903,11 +7884,35 @@ useEffect(() => {
 
 
 
-          </div>
+            </div>
+
+          )}
 
 
 
           <div className="voice-ai-actions">
+
+
+
+            {started && !summary && showLiveTimer ? (
+
+              <div className="voice-ai-timer-pill">
+
+                <span>Timer</span>
+
+                <strong>{timerLabel}</strong>
+
+              </div>
+
+            ) : null}
+
+
+
+            {started && !summary ? (
+
+              <div className="voice-ai-badge voice-ai-navbar-badge">Live Interview</div>
+
+            ) : null}
 
 
 
@@ -7940,26 +7945,6 @@ useEffect(() => {
 
 
                 Home
-
-
-
-              </button>
-
-
-
-            ) : null}
-
-
-
-            {started && !summary ? (
-
-
-
-              <button className="mock-btn" onClick={handleEndInterview} style={{ background: "linear-gradient(135deg, #dc2626, #f97316)" }}>
-
-
-
-                End Interview
 
 
 
@@ -8203,7 +8188,7 @@ useEffect(() => {
 
 
 
-          <div className="voice-ai-layout voice-ai-live-layout" style={{ gridTemplateColumns: isCompactLayout ? "1fr" : "minmax(320px,0.86fr) minmax(0,1.14fr)" }}>
+          <div className="voice-ai-layout voice-ai-live-layout" style={{ gridTemplateColumns: "1fr" }}>
 
 
 
@@ -8211,7 +8196,17 @@ useEffect(() => {
 
 
 
-              <div className="voice-ai-panel voice-ai-video-panel">
+              <div className="voice-ai-live-stage">
+
+                <div className="voice-ai-panel voice-ai-session-stage-panel">
+
+                  <InterviewPresenceCard presence={livePresence} showStatusStrip={false} compact />
+
+                </div>
+
+
+
+                <div className="voice-ai-panel voice-ai-video-panel">
 
 
 
@@ -8367,62 +8362,6 @@ useEffect(() => {
 
 
                 </div>
-
-
-
-              </div>
-
-
-
-
-
-
-
-              <div className="voice-ai-panel voice-ai-mini-panel voice-ai-hud-panel">
-
-
-
-                <InterviewPresenceCard presence={livePresence} />
-
-
-
-                <h3 className="voice-ai-section-title">Interview HUD</h3>
-
-
-
-                <div className="voice-ai-hud-grid">
-
-
-
-                  <div className="voice-ai-hud-item"><span>Generation</span><strong>{formatProviderName(providers.generation_provider, "generation") || "Pending"}</strong></div>
-
-
-
-                  <div className="voice-ai-hud-item"><span>Evaluation</span><strong>{formatProviderName(providers.evaluation_provider, "evaluation") || "Pending"}</strong></div>
-
-
-
-                  <div className="voice-ai-hud-item"><span>Summary</span><strong>{formatProviderName(providers.summary_provider, "summary") || "Pending"}</strong></div>
-
-
-
-                  <div className="voice-ai-hud-item"><span>Answers</span><strong>{history.length}</strong></div>
-
-
-
-                  <div className="voice-ai-hud-item"><span>Listening</span><strong>{SpeechRecognition ? "Auto" : "Manual"}</strong></div>
-
-
-
-                  <div className="voice-ai-hud-item"><span>Focus</span><strong>{selectionFocus}</strong></div>
-
-
-
-                  <div className="voice-ai-hud-item"><span>Live state</span><strong>{livePhase}</strong></div>
-
-
-
-                  <div className="voice-ai-hud-item"><span>Silence timer</span><strong>Off</strong></div>
 
 
 
@@ -8727,6 +8666,16 @@ useEffect(() => {
 
 
               </div>
+
+
+
+              {started && !summary ? (
+                <div className="voice-ai-bottom-actions">
+                  <button className="mock-btn" onClick={handleEndInterview} style={{ background: "linear-gradient(135deg, #dc2626, #f97316)" }}>
+                    End Interview
+                  </button>
+                </div>
+              ) : null}
 
 
 
