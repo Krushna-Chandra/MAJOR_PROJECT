@@ -1,7 +1,9 @@
 import React, { useState, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import FaceTrackingOverlay from "../components/FaceTrackingOverlay";
 import "../App.css";
 import { useScrollToTop } from "../hooks/useScrollToTop";
+import { useFaceTracking } from "../hooks/useFaceTracking";
 import {
   clearInterviewFullscreenGuard,
   isFullscreenActive,
@@ -125,6 +127,7 @@ function Permissions() {
     };
   }, [permissions.microphone]);
   const cameraStreamRef = useRef(null);
+  const faceTracking = useFaceTracking(videoRef, { enabled: permissions.camera });
 
   // reset each time page opens
   React.useEffect(() => {
@@ -287,7 +290,13 @@ function Permissions() {
     }
   };
 
-  const allPermissionsGranted = permissions.camera && permissions.microphone && permissions.browser && permissions.fullscreen;
+  const faceVerificationPassed = permissions.camera && faceTracking.stable;
+  const allPermissionsGranted =
+    permissions.camera &&
+    permissions.microphone &&
+    permissions.browser &&
+    permissions.fullscreen &&
+    faceVerificationPassed;
 
   // change cursor to wait when any permission is loading
   React.useEffect(() => {
@@ -592,13 +601,40 @@ function Permissions() {
         {/* right: video feed and info panels */}
         <div style={{ flex: "1 1 420px", minWidth: 320, display: "flex", flexDirection: "column", gap: 14, minHeight: 0 }}>
           <div style={{ background: "white", padding: 8, borderRadius: 6, boxShadow: "0 2px 6px rgba(0,0,0,0.08)", flex: "1 1 0", minHeight: 260 }}>
-            <video
-              ref={videoRef}
-              style={{ width: "100%", borderRadius: 4, display: "block", height: "100%" }}
-              autoPlay
-              playsInline
-              muted
-            />
+            <div className="permission-camera-preview">
+              <video
+                ref={videoRef}
+                style={{ width: "100%", borderRadius: 4, display: "block", height: "100%" }}
+                autoPlay
+                playsInline
+                muted
+              />
+              <FaceTrackingOverlay
+                videoRef={videoRef}
+                faceBox={faceTracking.faceBox}
+                active={faceTracking.faceDetected}
+              />
+              <div className={`face-tracking-frame ${faceTracking.faceInsideFrame ? "is-ok" : "is-warning"}`} />
+              <div className={`face-tracking-warning ${faceTracking.stable ? "is-ok" : "is-warning"}`}>
+                {permissions.camera ? faceTracking.warning : "Grant camera access to start face verification."}
+              </div>
+            </div>
+            <div className="face-tracking-checks">
+              <div className={`face-tracking-check ${faceTracking.cameraOn ? "is-ok" : ""}`}>
+                <span /> Camera feed
+              </div>
+              <div className={`face-tracking-check ${faceTracking.faceDetected ? "is-ok" : ""}`}>
+                <span /> Face detected
+              </div>
+              <div className={`face-tracking-check ${faceTracking.faceInsideFrame ? "is-ok" : ""}`}>
+                <span /> Face inside frame
+              </div>
+            </div>
+            {faceTracking.detectorError ? (
+              <div className="face-tracking-error">
+                Face tracking could not load. Check your internet connection and retry camera access.
+              </div>
+            ) : null}
           </div>
 
           <div style={{ background: "white", padding: 16, borderRadius: 6, boxShadow: "0 2px 6px rgba(0,0,0,0.08)", flex: "0 0 auto" }}>

@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useScrollToTop } from "../hooks/useScrollToTop";
+import { useFaceTracking } from "../hooks/useFaceTracking";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useInterviewFullscreenGuard } from "../hooks/useInterviewFullscreenGuard";
 import { useRevealFullscreenWarning } from "../hooks/useRevealFullscreenWarning";
+import FaceTrackingOverlay from "../components/FaceTrackingOverlay";
 import {
   clearInterviewFullscreenGuard,
   isFullscreenActive,
@@ -2727,6 +2729,10 @@ const pauseForFullscreenLossRef = useRef(() => {});
 
   const dialogOpen = showEndConfirm || showStartupCancelConfirm || showFullscreenPrompt;
   useRevealFullscreenWarning(showFullscreenPrompt || (setupFullscreenBlocked && !dialogOpen));
+  const faceTracking = useFaceTracking(videoRef, {
+    enabled: started && !summary,
+    mode: "interview",
+  });
 
 
 
@@ -7866,7 +7872,37 @@ useEffect(() => {
 
 
 
-                <video className="voice-ai-video" ref={videoRef} autoPlay playsInline muted />
+                <div className="voice-ai-video-wrap">
+                  <video className="voice-ai-video" ref={videoRef} autoPlay playsInline muted />
+                  <FaceTrackingOverlay
+                    videoRef={videoRef}
+                    faceBox={faceTracking.faceBox}
+                    active={faceTracking.faceDetected}
+                    compact
+                  />
+                  <div className={`face-tracking-frame ${faceTracking.faceInsideFrame ? "is-ok" : "is-warning"}`} />
+                  <div className={`face-tracking-warning ${faceTracking.stable ? "is-ok" : "is-warning"}`}>
+                    {faceTracking.warning}
+                  </div>
+                </div>
+
+                <div className="face-tracking-checks is-dark">
+                  <div className={`face-tracking-check ${faceTracking.cameraOn ? "is-ok" : ""}`}>
+                    <span /> Camera live
+                  </div>
+                  <div className={`face-tracking-check ${faceTracking.faceDetected ? "is-ok" : ""}`}>
+                    <span /> Face visible
+                  </div>
+                  <div className={`face-tracking-check ${faceTracking.faceInsideFrame ? "is-ok" : ""}`}>
+                    <span /> In frame
+                  </div>
+                </div>
+
+                {faceTracking.detectorError ? (
+                  <div className="face-tracking-error is-dark">
+                    Face tracking could not load. Keep camera on and retry with a stable internet connection.
+                  </div>
+                ) : null}
 
 
 

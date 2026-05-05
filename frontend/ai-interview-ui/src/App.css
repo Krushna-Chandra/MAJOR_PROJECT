@@ -19438,6 +19438,171 @@ button {
 
 }
 
+.voice-ai-video-wrap,
+.permission-camera-preview {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 18px;
+  background: #020617;
+}
+
+.voice-ai-video-wrap {
+  height: min(29vh, 270px);
+  flex-shrink: 0;
+}
+
+.voice-ai-video-wrap .voice-ai-video,
+.permission-camera-preview video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.voice-ai-video-wrap .voice-ai-video {
+  border-radius: 18px;
+}
+
+.permission-camera-preview {
+  min-height: 260px;
+  height: clamp(260px, 35vh, 420px);
+}
+
+.face-tracking-frame {
+  position: absolute;
+  inset: 9% 14%;
+  border: 2px solid rgba(248, 113, 113, 0.9);
+  border-radius: 22px;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2), 0 0 34px rgba(248, 113, 113, 0.22);
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.face-tracking-frame.is-ok {
+  border-color: rgba(34, 197, 94, 0.95);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18), 0 0 34px rgba(34, 197, 94, 0.24);
+}
+
+.face-tracking-head-box {
+  position: absolute;
+  border: 3px solid #22c55e;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.24), 0 0 26px rgba(34, 197, 94, 0.38);
+  pointer-events: none;
+  transition: left 110ms linear, top 110ms linear, width 110ms linear, height 110ms linear;
+  z-index: 2;
+}
+
+.face-tracking-head-box span {
+  position: absolute;
+  left: -3px;
+  top: -28px;
+  padding: 4px 8px;
+  border-radius: 6px 6px 6px 0;
+  background: #16a34a;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.face-tracking-head-box.is-compact {
+  border-width: 2px;
+  border-radius: 8px;
+  opacity: 0.78;
+}
+
+.face-tracking-head-box.is-compact span {
+  display: none;
+}
+
+.face-tracking-warning {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(127, 29, 29, 0.9);
+  color: #fff7ed;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.35;
+  text-align: center;
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.28);
+}
+
+.face-tracking-warning.is-ok {
+  background: rgba(6, 95, 70, 0.88);
+  color: #ecfdf5;
+}
+
+.face-tracking-checks {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.face-tracking-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fee2e2;
+  color: #991b1b;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.face-tracking-check span {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+
+.face-tracking-check.is-ok {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.face-tracking-checks.is-dark .face-tracking-check {
+  background: rgba(127, 29, 29, 0.62);
+  color: #fecaca;
+  border: 1px solid rgba(248, 113, 113, 0.18);
+}
+
+.face-tracking-checks.is-dark .face-tracking-check.is-ok {
+  background: rgba(6, 95, 70, 0.5);
+  color: #bbf7d0;
+  border-color: rgba(34, 197, 94, 0.2);
+}
+
+.face-tracking-error {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #9a3412;
+  border: 1px solid #fed7aa;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.face-tracking-error.is-dark {
+  background: rgba(154, 52, 18, 0.2);
+  color: #fed7aa;
+  border-color: rgba(251, 146, 60, 0.25);
+}
+
 
 
 .voice-ai-meta-row,
