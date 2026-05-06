@@ -25,3 +25,10 @@ db = client["apis_db"]
 users_collection = db["users"]
 interview_sessions_collection = db["interview_sessions"]
 report_ratings_collection = db["report_ratings"]
+
+
+async def ensure_database_indexes() -> None:
+    await users_collection.create_index("email", unique=True, background=True)
+    await users_collection.create_index("reset_token", background=True, sparse=True)
+    await users_collection.create_index("verification_token", background=True, sparse=True)
+    await interview_sessions_collection.create_index("session_id", background=True, sparse=True)

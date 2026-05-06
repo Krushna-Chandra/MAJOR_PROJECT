@@ -5,8 +5,6 @@ import re
 import zlib
 import difflib
 import uuid
-import smtplib
-from email.message import EmailMessage
 from io import BytesIO
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
@@ -21,7 +19,8 @@ from fastapi import (
     HTTPException,
     Header,
     Body,
-    Query
+    Query,
+    BackgroundTasks,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -29,12 +28,16 @@ from jose import jwt, JWTError
 from bson import ObjectId
 from bson.errors import InvalidId
 from pymongo.errors import PyMongoError
-from database import users_collection, report_ratings_collection
+from database import users_collection, report_ratings_collection, ensure_database_indexes
 from auth_utils import (
     hash_password,
     verify_password,
     create_token,
     create_email_verification_token,
+    get_email_config_status,
+    get_frontend_base_url,
+    normalize_email,
+    send_reset_email,
     send_verification_email,
     verify_email_token,
     SECRET_KEY,
@@ -3498,6 +3501,41 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.get("/email/config-status")
+async def email_config_status():
+    return {
+        **get_email_config_status(),
+        "frontend_base_url": get_frontend_base_url(),
+        "require_email_verification": os.getenv("REQUIRE_EMAIL_VERIFICATION", "false").strip().lower() in {"1", "true", "yes"},
+    }
+
+
+@app.on_event("startup")
+async def startup_event():
+    try:
+        await ensure_database_indexes()
+    except Exception as exc:
+        print(f"Warning: failed to ensure database indexes: {exc}")
+
+
+def _requires_email_verification() -> bool:
+    return os.getenv("REQUIRE_EMAIL_VERIFICATION", "false").strip().lower() in {"1", "true", "yes"}
+
+
+def _send_verification_email_background(email: str, verification_link: str) -> None:
+    try:
+        send_verification_email(email, verification_link)
+    except Exception as exc:
+        print(f"Background verification email failed for {email}: {exc}")
+
+
+def _send_reset_email_background(email: str, reset_token: str) -> None:
+    try:
+        send_reset_email(email, reset_token)
+    except Exception as exc:
+        print(f"Background reset email failed for {email}: {exc}")
+
 # ---------------- DIRECTORIES ----------------
 UPLOAD_DIR = "uploads"
 FACE_DB = "face_db"
@@ -3559,18 +3597,25 @@ async def get_current_user(token: str, allow_db_fallback: bool = False):
 # ================= REGISTER =================
 @app.post("/register")
 async def register(
+    background_tasks: BackgroundTasks,
     first_name: str = Body(...),
     last_name: str = Body(...),
     email: str = Body(...),
     password: str = Body(...)
 ):
+    email = normalize_email(email)
     if not first_name.strip() or not last_name.strip():
         raise HTTPException(
             status_code=400,
             detail="First name and last name required"
         )
+    if not email:
+        raise HTTPException(
+            status_code=400,
+            detail="Email required"
+        )
 
-    existing = await users_collection.find_one({"email": email})
+    existing = await users_collection.find_one({"email": email}, {"_id": 1})
     if existing:
         raise HTTPException(
             status_code=400,
@@ -3586,7 +3631,7 @@ async def register(
         "email": email,
         "hashed_password": hash_password(password),
         "profile_image": None,
-        "is_verified": False,
+        "is_verified": not _requires_email_verification(),
         "verification_token": verification_token,
         "verification_token_expires": datetime.utcnow() + timedelta(hours=24),
         "created_at": datetime.utcnow()
@@ -3594,18 +3639,20 @@ async def register(
 
     result = await users_collection.insert_one(user)
 
-    # Send verification email
-    frontend_base_url = os.getenv("REACT_APP_FRONTEND_BASE", "http://localhost:3000")
-    verification_link = f"{frontend_base_url}/verify-email?token={verification_token}&email={email}"
-    
-    email_sent = send_verification_email(email, verification_link)
+    if _requires_email_verification():
+        verification_link = f"{get_frontend_base_url()}/verify-email?token={verification_token}&email={email}"
+        background_tasks.add_task(_send_verification_email_background, email, verification_link)
 
     return {
         "status": "REGISTRATION SUCCESSFUL",
-        "message": "Please check your email to verify your account",
+        "message": (
+            "Please check your email shortly to verify your account"
+            if _requires_email_verification()
+            else "Registration successful. You can sign in now."
+        ),
         "id": str(result.inserted_id),
         "email": email,
-        "email_sent": email_sent
+        "email_sent": _requires_email_verification()
     }
 
 # ================= LOGIN =================
@@ -3614,11 +3661,18 @@ async def login(
     email: str = Body(...),
     password: str = Body(...)
 ):
+    email = normalize_email(email)
     user = await users_collection.find_one({"email": email})
     if not user:
         raise HTTPException(
             status_code=400,
             detail="User not found"
+        )
+
+    if not user.get("hashed_password"):
+        raise HTTPException(
+            status_code=400,
+            detail="This account uses Google sign-in. Please continue with Google."
         )
 
     if not verify_password(password, user["hashed_password"]):
@@ -3627,8 +3681,7 @@ async def login(
             detail="Invalid password"
         )
     
-    # Check if email is verified
-    if not user.get("is_verified", False):
+    if _requires_email_verification() and not user.get("is_verified", False):
         raise HTTPException(
             status_code=403,
             detail="Email not verified. Please check your email for verification link."
@@ -3657,6 +3710,7 @@ async def verify_email(
     email: str = Body(...)
 ):
     """Verify user email with token"""
+    email = normalize_email(email)
     user = await users_collection.find_one({"email": email})
     
     if not user:
@@ -3719,9 +3773,11 @@ async def verify_email(
 
 @app.post("/resend-verification-email")
 async def resend_verification_email(
+    background_tasks: BackgroundTasks,
     email: str = Body(...)
 ):
     """Resend verification email"""
+    email = normalize_email(email)
     user = await users_collection.find_one({"email": email})
     
     if not user:
@@ -3750,21 +3806,12 @@ async def resend_verification_email(
         }
     )
     
-    # Send verification email
-    frontend_base_url = os.getenv("REACT_APP_FRONTEND_BASE", "http://localhost:3000")
-    verification_link = f"{frontend_base_url}/verify-email?token={verification_token}&email={email}"
-    
-    email_sent = send_verification_email(email, verification_link)
-    
-    if not email_sent:
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to send verification email"
-        )
+    verification_link = f"{get_frontend_base_url()}/verify-email?token={verification_token}&email={email}"
+    background_tasks.add_task(_send_verification_email_background, email, verification_link)
     
     return {
         "status": "Verification email sent",
-        "message": "Check your email for verification link"
+        "message": "Check your email shortly for the verification link"
     }
 
 
@@ -3813,7 +3860,7 @@ async def google_login(request: GoogleTokenRequest):
         )
         
         # Extract user information from token
-        email = idinfo.get("email")
+        email = normalize_email(idinfo.get("email"))
         first_name = idinfo.get("given_name", "")
         last_name = idinfo.get("family_name", "")
         profile_image = idinfo.get("picture", None)
@@ -3889,14 +3936,18 @@ async def google_login(request: GoogleTokenRequest):
 
 # ================= FORGOT PASSWORD =================
 @app.post("/auth/forgot-password")
-async def forgot_password(payload: Dict[str, Any] = Body(...)):
+async def forgot_password(
+    background_tasks: BackgroundTasks,
+    payload: Dict[str, Any] = Body(...)
+):
     email = str(payload.get("email", "") or "")
-    normalized_email = email.strip()
+    normalized_email = normalize_email(email)
     if not normalized_email:
         raise HTTPException(status_code=400, detail="Email required")
 
     user = await users_collection.find_one(
-        {"email": {"$regex": f"^{re.escape(normalized_email)}$", "$options": "i"}}
+        {"email": normalized_email},
+        {"_id": 1, "email": 1, "reset_requested_at": 1}
     )
     # Always return a generic response for security reasons.
     if not user:
@@ -3925,15 +3976,12 @@ async def forgot_password(payload: Dict[str, Any] = Body(...)):
         }}
     )
 
-    try:
-        _send_reset_email(user["email"], reset_token)
-    except Exception:
-        pass
+    background_tasks.add_task(_send_reset_email_background, user["email"], reset_token)
 
     response = {"status": "RESET_LINK_SENT"}
     if DEV_RETURN_RESET_TOKEN:
         response["dev_reset_token"] = reset_token
-        response["dev_reset_link"] = f"{RESET_EMAIL_BASE_URL}/reset-password?token={reset_token}"
+        response["dev_reset_link"] = f"{get_frontend_base_url()}/reset-password?token={reset_token}"
     return response
 
 @app.post("/auth/reset-password/verify")
@@ -4905,31 +4953,4 @@ async def save_report_rating(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to save report rating: {exc}")
 
-# ---------------- EMAIL RESET CONFIG ----------------
-RESET_EMAIL_FROM = os.getenv("RESET_EMAIL_FROM", "").strip()
-RESET_EMAIL_SMTP_HOST = os.getenv("RESET_EMAIL_SMTP_HOST", "").strip()
-RESET_EMAIL_SMTP_PORT = int(os.getenv("RESET_EMAIL_SMTP_PORT", "587"))
-RESET_EMAIL_SMTP_USER = os.getenv("RESET_EMAIL_SMTP_USER", "").strip()
-RESET_EMAIL_SMTP_PASS = os.getenv("RESET_EMAIL_SMTP_PASS", "").strip()
-RESET_EMAIL_BASE_URL = os.getenv("RESET_EMAIL_BASE_URL", "http://localhost:3000").rstrip("/")
 DEV_RETURN_RESET_TOKEN = os.getenv("DEV_RETURN_RESET_TOKEN", "false").strip().lower() in {"1", "true", "yes"}
-
-def _send_reset_email(to_email: str, token: str) -> None:
-    if not RESET_EMAIL_FROM or not RESET_EMAIL_SMTP_HOST:
-        return
-    reset_link = f"{RESET_EMAIL_BASE_URL}/reset-password?token={token}"
-    msg = EmailMessage()
-    msg["Subject"] = "Reset your INTERVIEWR password"
-    msg["From"] = RESET_EMAIL_FROM
-    msg["To"] = to_email
-    msg.set_content(
-        "You requested a password reset for INTERVIEWR.\n\n"
-        f"Reset link: {reset_link}\n\n"
-        "This link is valid for 5 minutes.\n\n"
-        "If you did not request this, you can ignore this email."
-    )
-    with smtplib.SMTP(RESET_EMAIL_SMTP_HOST, RESET_EMAIL_SMTP_PORT) as server:
-        server.starttls()
-        if RESET_EMAIL_SMTP_USER and RESET_EMAIL_SMTP_PASS:
-            server.login(RESET_EMAIL_SMTP_USER, RESET_EMAIL_SMTP_PASS)
-        server.send_message(msg)
